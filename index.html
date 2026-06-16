@@ -224,6 +224,8 @@
     <div class="filter-scroll" id="daibunruiChips"></div>
     <div class="filter-row-label">対象（ラベル色）</div>
     <div class="filter-scroll" id="taishoChips"></div>
+    <div class="filter-row-label" id="toshoSizeLabel" style="display:none;">図書サイズ</div>
+    <div class="filter-scroll" id="toshoSizeChips" style="display:none;"></div>
     <div class="filter-row-label">背ラベル</div>
     <div class="filter-scroll" id="seLabelChips"></div>
     <div class="filter-row-label">表示</div>
@@ -312,7 +314,7 @@
 
   var allBooks = [];
   var statusMap = {};        // id -> {status, memo, updatedAt}
-  var filters = {daibunrui:"", taisho:"", seLabel:"", statusView:"all"};
+  var filters = {daibunrui:"", taisho:"", toshoSize:"", seLabel:"", statusView:"all"};
   var currentBookId = null;
   var visibleList = [];
 
@@ -346,7 +348,10 @@
   function loadFilters(){
     try{
       var raw = localStorage.getItem(FILTER_KEY);
-      if(raw){ filters = JSON.parse(raw); }
+      if(raw){
+        var parsed = JSON.parse(raw);
+        filters = Object.assign({daibunrui:"", taisho:"", toshoSize:"", seLabel:"", statusView:"all"}, parsed);
+      }
     }catch(e){}
   }
   function saveFilters(){
@@ -443,11 +448,16 @@
     return keys.map(function(k){ return {value:k, count:set[k]}; });
   }
 
+  var TOSHO_SIZE_ORDER = ["文庫","新書","単行本","大型","コミック文庫","コミック新書","コミック単行本"];
+
   function currentScopeBooks(beforeField){
     // beforeField: フィルタ構築時、自分より前の段の絞り込みだけ反映した本リストを返す
+    var order = ["daibunrui","taisho","toshoSize","seLabel"];
+    var stopAt = order.indexOf(beforeField);
     return allBooks.filter(function(b){
-      if(beforeField !== "daibunrui" && filters.daibunrui && b["大分類"] !== filters.daibunrui) return false;
-      if(beforeField !== "taisho" && beforeField !== "daibunrui" && filters.taisho && b["対象"] !== filters.taisho) return false;
+      if(stopAt > 0 && filters.daibunrui && b["大分類"] !== filters.daibunrui) return false;
+      if(stopAt > 1 && filters.taisho && b["対象"] !== filters.taisho) return false;
+      if(stopAt > 2 && filters.daibunrui === "読む" && filters.toshoSize && b["図書サイズ"] !== filters.toshoSize) return false;
       return true;
     });
   }
@@ -458,7 +468,7 @@
     var daiOptions = uniqueOrdered(daiScope.map(function(b){return b["大分類"];}), DAIBUNRUI_ORDER);
     renderChipRow("daibunruiChips", daiOptions, filters.daibunrui, function(val){
       filters.daibunrui = (filters.daibunrui === val) ? "" : val;
-      filters.taisho = ""; filters.seLabel = "";
+      filters.taisho = ""; filters.toshoSize = ""; filters.seLabel = "";
       saveFilters(); buildFilterChips(); renderList();
     }, true);
 
@@ -467,11 +477,28 @@
     var taishoOptions = uniqueOrdered(taishoScope.map(function(b){return b["対象"];}), TAISHO_ORDER);
     renderChipRow("taishoChips", taishoOptions, filters.taisho, function(val){
       filters.taisho = (filters.taisho === val) ? "" : val;
-      filters.seLabel = "";
+      filters.toshoSize = ""; filters.seLabel = "";
       saveFilters(); buildFilterChips(); renderList();
     }, true);
 
-    // 背ラベル（大分類・対象で絞った範囲内）
+    // 図書サイズ（「読む」の時だけ表示）
+    if(filters.daibunrui === "読む"){
+      var sizeScope = currentScopeBooks("seLabel");
+      var sizeOptions = uniqueOrdered(sizeScope.map(function(b){return b["図書サイズ"];}), TOSHO_SIZE_ORDER);
+      $("toshoSizeLabel").style.display = "";
+      $("toshoSizeChips").style.display = "";
+      renderChipRow("toshoSizeChips", sizeOptions, filters.toshoSize, function(val){
+        filters.toshoSize = (filters.toshoSize === val) ? "" : val;
+        filters.seLabel = "";
+        saveFilters(); buildFilterChips(); renderList();
+      }, true);
+    } else {
+      filters.toshoSize = "";
+      $("toshoSizeLabel").style.display = "none";
+      $("toshoSizeChips").style.display = "none";
+    }
+
+    // 背ラベル（大分類・対象・図書サイズで絞った範囲内）
     var seScope = currentScopeBooks("seLabel");
     var seOptions = uniqueOrdered(seScope.map(function(b){return b["背ラベル"];}), []);
     renderChipRow("seLabelChips", seOptions, filters.seLabel, function(val){
@@ -529,6 +556,7 @@
   function matchesFilters(b){
     if(filters.daibunrui && b["大分類"] !== filters.daibunrui) return false;
     if(filters.taisho && b["対象"] !== filters.taisho) return false;
+    if(filters.daibunrui === "読む" && filters.toshoSize && b["図書サイズ"] !== filters.toshoSize) return false;
     if(filters.seLabel && b["背ラベル"] !== filters.seLabel) return false;
     var entry = statusMap[b.id] || {};
     var st = entry.status || "";
@@ -543,10 +571,11 @@
   function renderList(){
     visibleList = allBooks.filter(matchesFilters);
 
-    // 進捗（チェック済み件数は「現在の大分類/対象/背ラベル絞り込み」だけを基準にする。statusView自体は除外して数える）
+    // 進捗（チェック済み件数は「現在の絞り込み」だけを基準にする。statusView自体は除外して数える）
     var scopeForProgress = allBooks.filter(function(b){
       if(filters.daibunrui && b["大分類"] !== filters.daibunrui) return false;
       if(filters.taisho && b["対象"] !== filters.taisho) return false;
+      if(filters.daibunrui === "読む" && filters.toshoSize && b["図書サイズ"] !== filters.toshoSize) return false;
       if(filters.seLabel && b["背ラベル"] !== filters.seLabel) return false;
       return true;
     });
@@ -751,6 +780,7 @@
     var scopeIds = allBooks.filter(function(b){
       if(filters.daibunrui && b["大分類"] !== filters.daibunrui) return false;
       if(filters.taisho && b["対象"] !== filters.taisho) return false;
+      if(filters.daibunrui === "読む" && filters.toshoSize && b["図書サイズ"] !== filters.toshoSize) return false;
       if(filters.seLabel && b["背ラベル"] !== filters.seLabel) return false;
       return true;
     }).map(function(b){ return b.id; });
