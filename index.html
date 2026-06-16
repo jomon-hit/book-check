@@ -697,11 +697,16 @@
     var memo = $("memoInput").value.trim();
     var status = pendingStatus !== undefined ? pendingStatus : ((statusMap[currentBookId]&&statusMap[currentBookId].status)||"");
     var reflected = (status === "fix") && $("reflectedCheckbox").checked;
+    var savedId = currentBookId;
+
+    // renderList()でvisibleListが更新される前に、現在の並びでの次の本を特定しておく
+    var idx = visibleList.findIndex(function(b){ return b.id === savedId; });
+    var nextId = (idx >= 0 && idx + 1 < visibleList.length) ? visibleList[idx + 1].id : null;
 
     if(!status && !memo){
-      delete statusMap[currentBookId];
+      delete statusMap[savedId];
     } else {
-      statusMap[currentBookId] = {
+      statusMap[savedId] = {
         status: status,
         memo: memo,
         reflected: reflected,
@@ -710,9 +715,15 @@
     }
     saveStatusMap();
     pendingStatus = undefined;
-    closeDetail();
     renderList();
     showToast(status ? (STATUS_META[status] ? STATUS_META[status].emoji + (reflected ? " 反映済みとして記録" : " 記録しました") : "記録しました") : "クリアしました");
+
+    if(nextId){
+      openDetail(nextId);
+    } else {
+      closeDetail();
+      if(idx >= 0) showToast("この絞り込みの最後まで進みました");
+    }
   }
 
   // ---------- メニュー ----------
