@@ -1,0 +1,811 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>はまとしょ 蔵書点検</title>
+<link rel="apple-touch-icon" href="icon/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="icon/favicon-32.png">
+<link rel="icon" type="image/png" sizes="192x192" href="icon/icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="蔵書点検">
+<style>
+  :root{
+    --bg:#f6f2e9;
+    --paper:#fffdf8;
+    --ink:#2e2a24;
+    --ink-soft:#6b6358;
+    --line:#e3dcca;
+    --navy:#28406b;
+    --green:#3f6b3f;
+    --gold:#a8801f;
+    --rust:#9c4a2e;
+    --shadow:0 2px 10px rgba(50,40,20,0.08);
+    --radius:14px;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);
+    font-family:"Hiragino Sans","Yu Gothic UI","Noto Sans JP",sans-serif;
+    -webkit-font-smoothing:antialiased; overscroll-behavior-y:contain;}
+  #app{min-height:100vh; display:flex; flex-direction:column;}
+
+  header.topbar{
+    position:sticky; top:0; z-index:30;
+    background:var(--paper); border-bottom:1px solid var(--line);
+    padding:10px 14px 8px; box-shadow:var(--shadow);
+  }
+  .topbar-row{display:flex; align-items:center; justify-content:space-between; gap:8px;}
+  .brand{display:flex; align-items:baseline; gap:8px;}
+  .brand .mark{width:30px; height:30px; border-radius:8px; flex:0 0 auto;}
+  .brand h1{font-size:15px; font-weight:700; margin:0; letter-spacing:.02em;}
+  .brand .sub{font-size:11px; color:var(--ink-soft);}
+  .icon-btn{
+    background:none; border:1px solid var(--line); border-radius:10px;
+    width:36px; height:36px; font-size:16px; display:flex; align-items:center; justify-content:center;
+    color:var(--ink-soft);
+  }
+  .icon-btn:active{background:var(--line);}
+
+  .progress-wrap{margin-top:8px;}
+  .progress-label{font-size:11px; color:var(--ink-soft); display:flex; justify-content:space-between; margin-bottom:3px;}
+  .progress-bar{height:6px; border-radius:4px; background:var(--line); overflow:hidden;}
+  .progress-fill{height:100%; background:linear-gradient(90deg,var(--green),#6fa86f); transition:width .25s ease;}
+
+  /* フィルターチップ */
+  .filter-scroll{display:flex; gap:6px; overflow-x:auto; padding:10px 14px 4px; scrollbar-width:none;}
+  .filter-scroll::-webkit-scrollbar{display:none;}
+  .chip{
+    flex:0 0 auto; padding:7px 13px; border-radius:999px; font-size:13px;
+    background:var(--paper); border:1px solid var(--line); color:var(--ink-soft);
+    white-space:nowrap;
+  }
+  .chip.active{background:var(--navy); color:#fff; border-color:var(--navy); font-weight:700;}
+  .chip .count{opacity:.65; font-size:11px; margin-left:2px;}
+
+  .filter-row-label{font-size:10px; color:var(--ink-soft); padding:8px 14px 0; letter-spacing:.08em;}
+
+  /* ステータスフィルタ */
+  .status-filter{display:flex; gap:6px; padding:8px 14px 12px; flex-wrap:wrap;}
+  .status-chip{
+    padding:5px 10px; border-radius:8px; font-size:12px; border:1px solid var(--line);
+    background:var(--paper); color:var(--ink-soft);
+  }
+  .status-chip.active{border-color:var(--ink); color:var(--ink); background:#eee7d5; font-weight:700;}
+
+  main{flex:1; padding:6px 12px 100px;}
+
+  .loading{padding:80px 20px; text-align:center; color:var(--ink-soft);}
+  .loading .spinner{
+    width:34px; height:34px; margin:0 auto 14px; border-radius:50%;
+    border:3px solid var(--line); border-top-color:var(--navy);
+    animation:spin 0.9s linear infinite;
+  }
+  @keyframes spin{to{transform:rotate(360deg);}}
+
+  .empty-state{padding:60px 20px; text-align:center; color:var(--ink-soft); font-size:14px; line-height:1.8;}
+
+  /* 本カード */
+  .book-card{
+    background:var(--paper); border-radius:var(--radius); box-shadow:var(--shadow);
+    margin:8px 0; padding:10px; display:flex; gap:10px; position:relative;
+    border:1px solid var(--line); transition:opacity .15s;
+  }
+  .book-card.done{opacity:.55;}
+  .book-cover{
+    width:54px; height:74px; flex:0 0 auto; border-radius:6px; background:#e9e3d2;
+    object-fit:cover; box-shadow:0 1px 4px rgba(0,0,0,0.15);
+  }
+  .book-cover.placeholder{
+    display:flex; align-items:center; justify-content:center; font-size:10px; color:var(--ink-soft);
+    text-align:center; padding:4px;
+  }
+  .book-main{flex:1; min-width:0;}
+  .book-title{font-size:14px; font-weight:700; line-height:1.35; margin:0 0 3px;
+    overflow:hidden; text-overflow:ellipsis; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical;}
+  .book-author{font-size:12px; color:var(--ink-soft); margin:0 0 6px;}
+  .book-meta{display:flex; gap:5px; flex-wrap:wrap;}
+  .meta-tag{font-size:10px; padding:2px 7px; border-radius:5px; background:var(--bg); color:var(--ink-soft); border:1px solid var(--line);}
+  .status-badge{
+    position:absolute; top:8px; right:8px; font-size:18px; line-height:1;
+  }
+
+  /* 詳細パネル（モーダル） */
+  .sheet-overlay{
+    position:fixed; inset:0; background:rgba(30,25,15,0.45); z-index:50;
+    display:flex; align-items:flex-end; opacity:0; pointer-events:none; transition:opacity .2s;
+  }
+  .sheet-overlay.open{opacity:1; pointer-events:auto;}
+  .sheet{
+    background:var(--paper); width:100%; border-radius:20px 20px 0 0;
+    padding:18px 18px 28px; max-height:88vh; overflow-y:auto;
+    transform:translateY(100%); transition:transform .25s ease;
+  }
+  .sheet-overlay.open .sheet{transform:translateY(0);}
+  .sheet-handle{width:40px; height:4px; background:var(--line); border-radius:3px; margin:0 auto 14px;}
+  .sheet-header{display:flex; gap:12px; margin-bottom:14px;}
+  .sheet-cover{width:70px; height:96px; border-radius:6px; object-fit:cover; flex:0 0 auto; background:#e9e3d2;}
+  .sheet-title{font-size:16px; font-weight:700; margin:0 0 4px; line-height:1.4;}
+  .sheet-author{font-size:13px; color:var(--ink-soft); margin:0 0 8px;}
+  .sheet-tags{display:flex; gap:5px; flex-wrap:wrap;}
+
+  .status-grid{display:grid; grid-template-columns:1fr 1fr; gap:8px; margin:14px 0;}
+  .status-btn{
+    padding:14px 10px; border-radius:12px; border:2px solid var(--line); background:var(--paper);
+    font-size:13px; font-weight:700; display:flex; flex-direction:column; align-items:center; gap:4px;
+    color:var(--ink);
+  }
+  .status-btn .emoji{font-size:22px;}
+  .status-btn.sel-checked{border-color:var(--green); background:#eef5ea;}
+  .status-btn.sel-fix{border-color:var(--gold); background:#fbf3e2;}
+  .status-btn.sel-withdraw{border-color:var(--rust); background:#fbeae4;}
+  .status-btn.sel-continue{border-color:var(--navy); background:#e9eef6;}
+  .status-btn.clear-btn{grid-column:1 / span 2; border-style:dashed; color:var(--ink-soft); font-weight:500; padding:10px;}
+
+  .memo-label{font-size:12px; color:var(--ink-soft); margin:10px 0 6px; display:block;}
+  .memo-input{
+    width:100%; min-height:70px; border:1px solid var(--line); border-radius:10px; padding:10px;
+    font-size:14px; font-family:inherit; resize:vertical; background:var(--bg);
+  }
+  .memo-input:focus{outline:2px solid var(--navy); outline-offset:1px;}
+
+  .sheet-actions{display:flex; gap:8px; margin-top:16px;}
+  .btn-secondary, .btn-primary{
+    flex:1; padding:13px; border-radius:10px; font-size:14px; font-weight:700; border:none;
+  }
+  .btn-secondary{background:var(--bg); color:var(--ink-soft); border:1px solid var(--line);}
+  .btn-primary{background:var(--navy); color:#fff;}
+
+  .qr-link{font-size:12px; color:var(--navy); text-decoration:underline; display:inline-block; margin-top:8px;}
+
+  /* フッターメニュー */
+  .fab-menu-overlay{
+    position:fixed; inset:0; background:rgba(30,25,15,0.45); z-index:60;
+    opacity:0; pointer-events:none; transition:opacity .2s;
+  }
+  .fab-menu-overlay.open{opacity:1; pointer-events:auto;}
+  .fab-menu{
+    position:fixed; bottom:0; left:0; right:0; background:var(--paper); z-index:61;
+    border-radius:18px 18px 0 0; padding:16px 18px 30px;
+    transform:translateY(100%); transition:transform .25s ease;
+  }
+  .fab-menu-overlay.open .fab-menu{transform:translateY(0);}
+  .fab-menu h3{margin:0 0 12px; font-size:14px; color:var(--ink-soft);}
+  .menu-item{
+    display:flex; align-items:center; gap:10px; width:100%; padding:13px 4px; border:none; background:none;
+    font-size:14px; color:var(--ink); border-bottom:1px solid var(--line); text-align:left;
+  }
+  .menu-item:last-child{border-bottom:none;}
+  .menu-item .em{font-size:18px; width:24px; text-align:center;}
+  .menu-item.danger{color:var(--rust);}
+
+  .fab{
+    position:fixed; bottom:18px; right:18px; z-index:40;
+    width:54px; height:54px; border-radius:50%; background:var(--navy); color:#fff;
+    border:none; font-size:22px; box-shadow:0 4px 14px rgba(0,0,0,0.25);
+    display:flex; align-items:center; justify-content:center;
+  }
+  .fab:active{transform:scale(.95);}
+
+  .toast{
+    position:fixed; bottom:90px; left:50%; transform:translateX(-50%);
+    background:var(--ink); color:#fff; padding:10px 18px; border-radius:30px; font-size:13px;
+    z-index:80; opacity:0; transition:opacity .25s, transform .25s; pointer-events:none;
+  }
+  .toast.show{opacity:1;}
+
+  textarea, input{font-size:14px;}
+</style>
+</head>
+<body>
+<div id="app">
+
+  <header class="topbar">
+    <div class="topbar-row">
+      <div class="brand">
+        <img class="mark" src="icon/icon-192.png" alt="">
+        <div>
+          <h1>はまとしょ 蔵書点検</h1>
+          <div class="sub" id="totalCountLabel">読み込み中…</div>
+        </div>
+      </div>
+      <button class="icon-btn" id="reloadBtn" title="最新データを再読込">⟳</button>
+    </div>
+    <div class="progress-wrap">
+      <div class="progress-label">
+        <span id="progressText">この絞り込み 0 / 0 件 チェック済み</span>
+      </div>
+      <div class="progress-bar"><div class="progress-fill" id="progressFill" style="width:0%"></div></div>
+    </div>
+  </header>
+
+  <div id="filterArea" style="display:none;">
+    <div class="filter-row-label">大分類</div>
+    <div class="filter-scroll" id="daibunruiChips"></div>
+    <div class="filter-row-label">対象（ラベル色）</div>
+    <div class="filter-scroll" id="taishoChips"></div>
+    <div class="filter-row-label">背ラベル</div>
+    <div class="filter-scroll" id="seLabelChips"></div>
+    <div class="filter-row-label">表示</div>
+    <div class="status-filter" id="statusFilterChips"></div>
+  </div>
+
+  <main id="bookList">
+    <div class="loading">
+      <div class="spinner"></div>
+      最新の蔵書データを読み込んでいます…
+    </div>
+  </main>
+
+  <button class="fab" id="fabBtn" title="メニュー">⋯</button>
+</div>
+
+<!-- 詳細シート -->
+<div class="sheet-overlay" id="detailOverlay">
+  <div class="sheet" id="detailSheet">
+    <div class="sheet-handle"></div>
+    <div class="sheet-header">
+      <img class="sheet-cover" id="sheetCover" src="" alt="">
+      <div>
+        <p class="sheet-title" id="sheetTitle"></p>
+        <p class="sheet-author" id="sheetAuthor"></p>
+        <div class="sheet-tags" id="sheetTags"></div>
+      </div>
+    </div>
+
+    <div class="status-grid">
+      <button class="status-btn" data-status="checked"><span class="emoji">✅</span>チェック済み</button>
+      <button class="status-btn" data-status="fix"><span class="emoji">⚠️</span>データ修正要</button>
+      <button class="status-btn" data-status="withdraw"><span class="emoji">🗑</span>除籍候補</button>
+      <button class="status-btn" data-status="continue"><span class="emoji">📖</span>続刊確認</button>
+      <button class="status-btn clear-btn" data-status="">ステータスをクリア</button>
+    </div>
+
+    <div id="reflectedWrap" style="display:none; margin:-4px 0 10px;">
+      <label style="display:flex; align-items:center; gap:8px; padding:11px 12px; border-radius:10px; border:1px solid var(--line); background:var(--bg); font-size:13px; font-weight:700;">
+        <input type="checkbox" id="reflectedCheckbox" style="width:18px; height:18px;">
+        Excelに反映済み
+      </label>
+    </div>
+
+    <label class="memo-label">メモ（修正内容・理由など）</label>
+    <textarea class="memo-input" id="memoInput" placeholder="例：対象は「絵本」のはず／表紙が破損していて貸出不可 など"></textarea>
+
+    <div id="qrLinkWrap"></div>
+
+    <div class="sheet-actions">
+      <button class="btn-secondary" id="closeSheetBtn">閉じる</button>
+      <button class="btn-primary" id="saveSheetBtn">保存して次へ</button>
+    </div>
+  </div>
+</div>
+
+<!-- フッターメニュー -->
+<div class="fab-menu-overlay" id="fabOverlay">
+  <div class="fab-menu">
+    <h3>メニュー</h3>
+    <button class="menu-item" id="exportJsonBtn"><span class="em">⬇️</span>点検結果をJSONで書き出す</button>
+    <button class="menu-item" id="showOnlyUncheckedBtn"><span class="em">👁</span><span id="toggleUncheckedLabel">未チェックのみ表示にする</span></button>
+    <button class="menu-item" id="statsBtn"><span class="em">📊</span>点検状況の全体サマリー</button>
+    <button class="menu-item danger" id="resetBtn"><span class="em">🗑</span>この絞り込みの点検状況をリセット</button>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+(function(){
+  "use strict";
+
+  var BOOKS_URL = "https://hamatosho-search.vercel.app/books.json";
+  var STORAGE_KEY = "shelfCheckStatus_v1";
+  var FILTER_KEY = "shelfCheckFilters_v1";
+  var BOOKS_CACHE_KEY = "shelfCheckBooksCache_v1";
+  var BOOKS_CACHE_TIME_KEY = "shelfCheckBooksCacheTime_v1";
+
+  var STATUS_META = {
+    checked:  {emoji:"✅", label:"チェック済み"},
+    fix:      {emoji:"⚠️", label:"データ修正要"},
+    withdraw: {emoji:"🗑", label:"除籍候補"},
+    continue: {emoji:"📖", label:"続刊確認"}
+  };
+
+  var allBooks = [];
+  var statusMap = {};        // id -> {status, memo, updatedAt}
+  var filters = {daibunrui:"", taisho:"", seLabel:"", statusView:"all"};
+  var currentBookId = null;
+  var visibleList = [];
+
+  // ---------- ユーティリティ ----------
+  function $(id){ return document.getElementById(id); }
+  function escapeHtml(s){
+    return (s||"").replace(/[&<>"']/g, function(c){
+      return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];
+    });
+  }
+  function showToast(msg){
+    var t = $("toast");
+    t.textContent = msg;
+    t.classList.add("show");
+    setTimeout(function(){ t.classList.remove("show"); }, 1600);
+  }
+
+  function loadStatusMap(){
+    try{
+      var raw = localStorage.getItem(STORAGE_KEY);
+      statusMap = raw ? JSON.parse(raw) : {};
+    }catch(e){ statusMap = {}; }
+  }
+  function saveStatusMap(){
+    try{
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(statusMap));
+    }catch(e){
+      showToast("保存に失敗しました（容量制限の可能性）");
+    }
+  }
+  function loadFilters(){
+    try{
+      var raw = localStorage.getItem(FILTER_KEY);
+      if(raw){ filters = JSON.parse(raw); }
+    }catch(e){}
+  }
+  function saveFilters(){
+    try{ localStorage.setItem(FILTER_KEY, JSON.stringify(filters)); }catch(e){}
+  }
+
+  // ---------- データ取得 ----------
+  function loadBooksFromCache(){
+    try{
+      var raw = localStorage.getItem(BOOKS_CACHE_KEY);
+      if(!raw) return null;
+      return JSON.parse(raw);
+    }catch(e){ return null; }
+  }
+  function saveBooksToCache(data){
+    try{
+      localStorage.setItem(BOOKS_CACHE_KEY, JSON.stringify(data));
+      localStorage.setItem(BOOKS_CACHE_TIME_KEY, new Date().toISOString());
+    }catch(e){
+      showToast("蔵書データの保存に失敗しました（容量制限の可能性）");
+    }
+  }
+  function getCacheTimeLabel(){
+    var t = localStorage.getItem(BOOKS_CACHE_TIME_KEY);
+    if(!t) return "";
+    var d = new Date(t);
+    var pad = function(n){ return String(n).padStart(2,"0"); };
+    return d.getMonth()+1 + "/" + d.getDate() + " " + pad(d.getHours()) + ":" + pad(d.getMinutes());
+  }
+  function updateCacheTimeLabel(){
+    var label = getCacheTimeLabel();
+    $("totalCountLabel").textContent = "全 " + allBooks.length + " 件" + (label ? "（データ取得: " + label + "）" : "");
+  }
+
+  function applyBooksData(data, fromNetwork){
+    allBooks = data.filter(function(b){ return b.id; });
+    if(fromNetwork) saveBooksToCache(data);
+    $("filterArea").style.display = "";
+    buildFilterChips();
+    renderList();
+  }
+
+  function startApp(){
+    var cached = loadBooksFromCache();
+    if(cached && cached.length){
+      applyBooksData(cached, false);
+      showToast("保存済みデータを表示中（最新化は右上の⟳）");
+    } else {
+      fetchFromNetwork();
+    }
+  }
+
+  function fetchFromNetwork(){
+    $("bookList").innerHTML = '<div class="loading"><div class="spinner"></div>最新の蔵書データを読み込んでいます…</div>';
+    $("filterArea").style.display = "none";
+    var url = BOOKS_URL + "?t=" + Date.now();
+    fetch(url)
+      .then(function(res){
+        if(!res.ok) throw new Error("HTTP " + res.status);
+        return res.json();
+      })
+      .then(function(data){
+        applyBooksData(data, true);
+        showToast("最新データを取得しました");
+      })
+      .catch(function(err){
+        var cached = loadBooksFromCache();
+        if(cached && cached.length){
+          applyBooksData(cached, false);
+          showToast("通信に失敗。保存済みデータを表示しています");
+        } else {
+          $("bookList").innerHTML =
+            '<div class="empty-state">⚠️ データを読み込めませんでした。<br>' +
+            'Wi-Fiにつながる場所で、右上の ⟳ を押してください。<br>' +
+            '<span style="font-size:11px;opacity:.7;">(' + escapeHtml(String(err.message||err)) + ')</span></div>';
+        }
+      });
+  }
+
+  // ---------- フィルターチップ構築 ----------
+  var DAIBUNRUI_ORDER = ["読む","知る","実用","雑誌"];
+  var TAISHO_ORDER = ["一般向け","高学年から","低学年から","幼児","絵本","メディア","図鑑"];
+
+  function uniqueOrdered(values, preferredOrder){
+    var set = {};
+    values.forEach(function(v){ if(v) set[v] = (set[v]||0)+1; });
+    var keys = Object.keys(set);
+    keys.sort(function(a,b){
+      var ia = preferredOrder.indexOf(a), ib = preferredOrder.indexOf(b);
+      if(ia === -1) ia = 999; if(ib === -1) ib = 999;
+      if(ia !== ib) return ia - ib;
+      return a.localeCompare(b, "ja");
+    });
+    return keys.map(function(k){ return {value:k, count:set[k]}; });
+  }
+
+  function currentScopeBooks(beforeField){
+    // beforeField: フィルタ構築時、自分より前の段の絞り込みだけ反映した本リストを返す
+    return allBooks.filter(function(b){
+      if(beforeField !== "daibunrui" && filters.daibunrui && b["大分類"] !== filters.daibunrui) return false;
+      if(beforeField !== "taisho" && beforeField !== "daibunrui" && filters.taisho && b["対象"] !== filters.taisho) return false;
+      return true;
+    });
+  }
+
+  function buildFilterChips(){
+    // 大分類
+    var daiScope = allBooks;
+    var daiOptions = uniqueOrdered(daiScope.map(function(b){return b["大分類"];}), DAIBUNRUI_ORDER);
+    renderChipRow("daibunruiChips", daiOptions, filters.daibunrui, function(val){
+      filters.daibunrui = (filters.daibunrui === val) ? "" : val;
+      filters.taisho = ""; filters.seLabel = "";
+      saveFilters(); buildFilterChips(); renderList();
+    }, true);
+
+    // 対象（大分類で絞った範囲内）
+    var taishoScope = currentScopeBooks("taisho");
+    var taishoOptions = uniqueOrdered(taishoScope.map(function(b){return b["対象"];}), TAISHO_ORDER);
+    renderChipRow("taishoChips", taishoOptions, filters.taisho, function(val){
+      filters.taisho = (filters.taisho === val) ? "" : val;
+      filters.seLabel = "";
+      saveFilters(); buildFilterChips(); renderList();
+    }, true);
+
+    // 背ラベル（大分類・対象で絞った範囲内）
+    var seScope = currentScopeBooks("seLabel");
+    var seOptions = uniqueOrdered(seScope.map(function(b){return b["背ラベル"];}), []);
+    renderChipRow("seLabelChips", seOptions, filters.seLabel, function(val){
+      filters.seLabel = (filters.seLabel === val) ? "" : val;
+      saveFilters(); renderList();
+    }, true);
+
+    // ステータス表示フィルタ
+    renderStatusFilterChips();
+  }
+
+  function renderChipRow(containerId, options, activeValue, onClick, showCount){
+    var el = $(containerId);
+    if(options.length === 0){
+      el.innerHTML = '<span style="font-size:12px;color:var(--ink-soft);padding:6px 4px;">該当なし</span>';
+      return;
+    }
+    el.innerHTML = "";
+    options.forEach(function(opt){
+      var chip = document.createElement("button");
+      chip.className = "chip" + (opt.value === activeValue ? " active" : "");
+      chip.innerHTML = escapeHtml(opt.value) + (showCount ? '<span class="count">' + opt.count + '</span>' : "");
+      chip.addEventListener("click", function(){ onClick(opt.value); });
+      el.appendChild(chip);
+    });
+  }
+
+  function renderStatusFilterChips(){
+    var el = $("statusFilterChips");
+    var defs = [
+      {key:"all", label:"すべて"},
+      {key:"unchecked", label:"未チェック"},
+      {key:"checked", label:"✅ チェック済み"},
+      {key:"fix", label:"⚠️ 修正要（未反映）"},
+      {key:"fix_reflected", label:"⚠️✔️ 修正要（反映済み）"},
+      {key:"withdraw", label:"🗑 除籍候補"},
+      {key:"continue", label:"📖 続刊確認"}
+    ];
+    el.innerHTML = "";
+    defs.forEach(function(d){
+      var chip = document.createElement("button");
+      chip.className = "status-chip" + (filters.statusView === d.key ? " active" : "");
+      chip.textContent = d.label;
+      chip.addEventListener("click", function(){
+        filters.statusView = d.key;
+        saveFilters();
+        renderStatusFilterChips();
+        renderList();
+      });
+      el.appendChild(chip);
+    });
+  }
+
+  // ---------- リスト表示 ----------
+  function matchesFilters(b){
+    if(filters.daibunrui && b["大分類"] !== filters.daibunrui) return false;
+    if(filters.taisho && b["対象"] !== filters.taisho) return false;
+    if(filters.seLabel && b["背ラベル"] !== filters.seLabel) return false;
+    var entry = statusMap[b.id] || {};
+    var st = entry.status || "";
+    var reflected = !!entry.reflected;
+    if(filters.statusView === "unchecked") return st === "";
+    if(filters.statusView === "fix") return st === "fix" && !reflected;
+    if(filters.statusView === "fix_reflected") return st === "fix" && reflected;
+    if(filters.statusView !== "all" && st !== filters.statusView) return false;
+    return true;
+  }
+
+  function renderList(){
+    visibleList = allBooks.filter(matchesFilters);
+
+    // 進捗（チェック済み件数は「現在の大分類/対象/背ラベル絞り込み」だけを基準にする。statusView自体は除外して数える）
+    var scopeForProgress = allBooks.filter(function(b){
+      if(filters.daibunrui && b["大分類"] !== filters.daibunrui) return false;
+      if(filters.taisho && b["対象"] !== filters.taisho) return false;
+      if(filters.seLabel && b["背ラベル"] !== filters.seLabel) return false;
+      return true;
+    });
+    var doneCount = scopeForProgress.filter(function(b){
+      var st = statusMap[b.id] && statusMap[b.id].status;
+      return st && st !== "";
+    }).length;
+    var total = scopeForProgress.length;
+    $("progressText").textContent = "この絞り込み " + doneCount + " / " + total + " 件 対応済み";
+    $("progressFill").style.width = total ? (doneCount/total*100) + "%" : "0%";
+    updateCacheTimeLabel();
+
+    var list = $("bookList");
+    if(visibleList.length === 0){
+      list.innerHTML = '<div class="empty-state">条件に合う本がありません。<br>絞り込みを変えてみてください。</div>';
+      return;
+    }
+
+    var html = visibleList.map(function(b){
+      var entry = statusMap[b.id] || {};
+      var st = entry.status;
+      var badge = st && STATUS_META[st]
+        ? '<span class="status-badge">' + STATUS_META[st].emoji + (st === "fix" && entry.reflected ? '<span style="font-size:12px;">✔️</span>' : "") + '</span>'
+        : "";
+      var coverHtml = b["書影"]
+        ? '<img class="book-cover" src="' + escapeHtml(b["書影"]) + '" alt="" loading="lazy" onerror="this.outerHTML=\'<div class=&quot;book-cover placeholder&quot;>表紙\\nなし</div>\'">'
+        : '<div class="book-cover placeholder">表紙<br>なし</div>';
+      return (
+        '<div class="book-card' + (st ? " done" : "") + '" data-id="' + escapeHtml(b.id) + '">' +
+          coverHtml +
+          '<div class="book-main">' +
+            '<p class="book-title">' + escapeHtml(b["タイトル"]||"(タイトル不明)") + '</p>' +
+            '<p class="book-author">' + escapeHtml(b["著者"]||"") + '</p>' +
+            '<div class="book-meta">' +
+              '<span class="meta-tag">' + escapeHtml(b["背ラベル"]||"-") + '</span>' +
+              '<span class="meta-tag">' + escapeHtml(b["図書サイズ"]||"-") + '</span>' +
+            '</div>' +
+          '</div>' +
+          badge +
+        '</div>'
+      );
+    }).join("");
+    list.innerHTML = html;
+
+    list.querySelectorAll(".book-card").forEach(function(card){
+      card.addEventListener("click", function(){
+        openDetail(card.getAttribute("data-id"));
+      });
+    });
+  }
+
+  // ---------- 詳細シート ----------
+  function findBook(id){
+    for(var i=0;i<allBooks.length;i++){ if(allBooks[i].id === id) return allBooks[i]; }
+    return null;
+  }
+
+  function openDetail(id){
+    var b = findBook(id);
+    if(!b) return;
+    currentBookId = id;
+
+    $("sheetCover").src = b["書影"] || "";
+    $("sheetCover").style.display = b["書影"] ? "" : "none";
+    $("sheetTitle").textContent = b["タイトル"] || "(タイトル不明)";
+    $("sheetAuthor").textContent = b["著者"] || "";
+    $("sheetTags").innerHTML =
+      '<span class="meta-tag">' + escapeHtml(b["大分類"]||"-") + '</span>' +
+      '<span class="meta-tag">' + escapeHtml(b["対象"]||"-") + '（' + escapeHtml(b["ラベル色"]||"-") + '）</span>' +
+      '<span class="meta-tag">' + escapeHtml(b["背ラベル"]||"-") + '</span>' +
+      '<span class="meta-tag">' + escapeHtml(b["図書サイズ"]||"-") + '</span>';
+
+    var existing = statusMap[id] || {};
+    $("memoInput").value = existing.memo || "";
+    $("reflectedCheckbox").checked = !!existing.reflected;
+
+    document.querySelectorAll(".status-btn").forEach(function(btn){
+      var s = btn.getAttribute("data-status");
+      btn.classList.remove("sel-checked","sel-fix","sel-withdraw","sel-continue");
+      if(s && s === existing.status){
+        btn.classList.add("sel-" + s);
+      }
+    });
+    updateReflectedVisibility(existing.status || "");
+
+    if(b.qr_url){
+      $("qrLinkWrap").innerHTML = '<a class="qr-link" href="' + escapeHtml(b.qr_url) + '" target="_blank" rel="noopener">カシカンでこの本を開く ↗</a>';
+    } else {
+      $("qrLinkWrap").innerHTML = "";
+    }
+
+    $("detailOverlay").classList.add("open");
+  }
+
+  function closeDetail(){
+    $("detailOverlay").classList.remove("open");
+    currentBookId = null;
+  }
+
+  function updateReflectedVisibility(status){
+    $("reflectedWrap").style.display = (status === "fix") ? "" : "none";
+  }
+
+  function setStatusOnCurrent(status){
+    document.querySelectorAll(".status-btn").forEach(function(btn){
+      var s = btn.getAttribute("data-status");
+      btn.classList.remove("sel-checked","sel-fix","sel-withdraw","sel-continue");
+      if(s === status && s !== ""){ btn.classList.add("sel-" + s); }
+    });
+    pendingStatus = status;
+    updateReflectedVisibility(status);
+    if(status !== "fix"){ $("reflectedCheckbox").checked = false; }
+  }
+
+  var pendingStatus = undefined; // undefined=未変更（既存維持）, ""=クリア, それ以外=設定
+
+  function saveCurrentAndNext(){
+    if(!currentBookId) return;
+    var memo = $("memoInput").value.trim();
+    var status = pendingStatus !== undefined ? pendingStatus : ((statusMap[currentBookId]&&statusMap[currentBookId].status)||"");
+    var reflected = (status === "fix") && $("reflectedCheckbox").checked;
+
+    if(!status && !memo){
+      delete statusMap[currentBookId];
+    } else {
+      statusMap[currentBookId] = {
+        status: status,
+        memo: memo,
+        reflected: reflected,
+        updatedAt: new Date().toISOString()
+      };
+    }
+    saveStatusMap();
+    pendingStatus = undefined;
+    closeDetail();
+    renderList();
+    showToast(status ? (STATUS_META[status] ? STATUS_META[status].emoji + (reflected ? " 反映済みとして記録" : " 記録しました") : "記録しました") : "クリアしました");
+  }
+
+  // ---------- メニュー ----------
+  function buildExportPayload(){
+    var items = [];
+    Object.keys(statusMap).forEach(function(id){
+      var entry = statusMap[id];
+      if(!entry || !entry.status && !entry.memo) return;
+      var b = findBook(id) || {};
+      items.push({
+        id: id,
+        タイトル: b["タイトル"] || "",
+        著者: b["著者"] || "",
+        大分類: b["大分類"] || "",
+        対象: b["対象"] || "",
+        背ラベル: b["背ラベル"] || "",
+        ISBN: b["ISBN"] || "",
+        ステータス: entry.status || "",
+        ステータス表示: STATUS_META[entry.status] ? STATUS_META[entry.status].label : "",
+        Excel反映済み: !!entry.reflected,
+        メモ: entry.memo || "",
+        更新日時: entry.updatedAt || ""
+      });
+    });
+    items.sort(function(a,b){ return (a.更新日時||"").localeCompare(b.更新日時||""); });
+    return {
+      点検日時: new Date().toISOString(),
+      件数: items.length,
+      items: items
+    };
+  }
+
+  function exportJson(){
+    var payload = buildExportPayload();
+    if(payload.items.length === 0){
+      showToast("まだ記録がありません");
+      return;
+    }
+    var blob = new Blob([JSON.stringify(payload, null, 2)], {type:"application/json"});
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    var ts = new Date();
+    var pad = function(n){ return String(n).padStart(2,"0"); };
+    var fname = "shelfcheck_" + ts.getFullYear() + pad(ts.getMonth()+1) + pad(ts.getDate()) + "_" + pad(ts.getHours()) + pad(ts.getMinutes()) + ".json";
+    a.href = url; a.download = fname;
+    document.body.appendChild(a); a.click();
+    setTimeout(function(){ document.body.removeChild(a); URL.revokeObjectURL(url); }, 500);
+    showToast(payload.items.length + "件を書き出しました");
+  }
+
+  function showStatsSummary(){
+    var counts = {checked:0, fix:0, fixReflected:0, withdraw:0, continue:0, memoOnly:0};
+    Object.keys(statusMap).forEach(function(id){
+      var e = statusMap[id];
+      if(e.status && counts.hasOwnProperty(e.status)) counts[e.status]++;
+      else if(!e.status && e.memo) counts.memoOnly++;
+      if(e.status === "fix" && e.reflected) counts.fixReflected++;
+    });
+    var msg = "✅" + counts.checked + " ⚠️" + counts.fix + "(✔️反映済" + counts.fixReflected + ") 🗑" + counts.withdraw + " 📖" + counts.continue +
+      (counts.memoOnly ? (" 📝のみ" + counts.memoOnly) : "");
+    showToast(msg);
+  }
+
+  function resetCurrentScope(){
+    var scopeIds = allBooks.filter(function(b){
+      if(filters.daibunrui && b["大分類"] !== filters.daibunrui) return false;
+      if(filters.taisho && b["対象"] !== filters.taisho) return false;
+      if(filters.seLabel && b["背ラベル"] !== filters.seLabel) return false;
+      return true;
+    }).map(function(b){ return b.id; });
+
+    if(!confirm("現在の絞り込み（" + scopeIds.length + "件）の点検状況をリセットします。よろしいですか？")) return;
+    scopeIds.forEach(function(id){ delete statusMap[id]; });
+    saveStatusMap();
+    renderList();
+    showToast("リセットしました");
+  }
+
+  // ---------- イベント結線 ----------
+  document.querySelectorAll(".status-btn").forEach(function(btn){
+    btn.addEventListener("click", function(){
+      setStatusOnCurrent(btn.getAttribute("data-status"));
+    });
+  });
+  $("closeSheetBtn").addEventListener("click", function(){
+    pendingStatus = undefined;
+    closeDetail();
+  });
+  $("saveSheetBtn").addEventListener("click", saveCurrentAndNext);
+  $("detailOverlay").addEventListener("click", function(e){
+    if(e.target === $("detailOverlay")){ pendingStatus = undefined; closeDetail(); }
+  });
+
+  $("fabBtn").addEventListener("click", function(){
+    $("fabOverlay").classList.add("open");
+  });
+  $("fabOverlay").addEventListener("click", function(e){
+    if(e.target === $("fabOverlay")) $("fabOverlay").classList.remove("open");
+  });
+  $("exportJsonBtn").addEventListener("click", function(){ $("fabOverlay").classList.remove("open"); exportJson(); });
+  $("statsBtn").addEventListener("click", function(){ $("fabOverlay").classList.remove("open"); showStatsSummary(); });
+  $("resetBtn").addEventListener("click", function(){ $("fabOverlay").classList.remove("open"); resetCurrentScope(); });
+  $("showOnlyUncheckedBtn").addEventListener("click", function(){
+    $("fabOverlay").classList.remove("open");
+    filters.statusView = (filters.statusView === "unchecked") ? "all" : "unchecked";
+    saveFilters();
+    renderStatusFilterChips();
+    renderList();
+  });
+
+  $("reloadBtn").addEventListener("click", function(){
+    if(confirm("Wi-Fiにつながっている状態で、最新の蔵書データを取得します。\n点検中のリストが入れ替わるので、作業の合間に行ってください。よろしいですか？")){
+      fetchFromNetwork();
+    }
+  });
+
+  // ---------- 初期化 ----------
+  loadStatusMap();
+  loadFilters();
+  startApp();
+
+})();
+</script>
+</body>
+</html>
