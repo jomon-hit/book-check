@@ -88,10 +88,11 @@
   /* 本カード */
   .book-card{
     background:var(--paper); border-radius:var(--radius); box-shadow:var(--shadow);
-    margin:8px 0; padding:10px; display:flex; gap:10px; position:relative;
+    margin:8px 0; padding:10px; position:relative;
     border:1px solid var(--line); transition:opacity .15s;
   }
-  .book-card.done{opacity:.55;}
+  .book-card.done{opacity:.7;}
+  .book-card-top{display:flex; gap:10px;}
   .book-cover{
     width:54px; height:74px; flex:0 0 auto; border-radius:6px; background:#e9e3d2;
     object-fit:cover; box-shadow:0 1px 4px rgba(0,0,0,0.15);
@@ -103,12 +104,26 @@
   .book-main{flex:1; min-width:0;}
   .book-title{font-size:14px; font-weight:700; line-height:1.35; margin:0 0 3px;
     overflow:hidden; text-overflow:ellipsis; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical;}
+  .book-title .memo-dot{font-size:11px; margin-left:4px; -webkit-line-clamp:initial;}
   .book-author{font-size:12px; color:var(--ink-soft); margin:0 0 6px;}
   .book-meta{display:flex; gap:5px; flex-wrap:wrap;}
   .meta-tag{font-size:10px; padding:2px 7px; border-radius:5px; background:var(--bg); color:var(--ink-soft); border:1px solid var(--line);}
-  .status-badge{
-    position:absolute; top:8px; right:8px; font-size:18px; line-height:1;
+
+  .flag-toggle-row{display:flex; gap:6px; margin-top:9px; padding-top:9px; border-top:1px solid var(--line);}
+  .flag-toggle{
+    flex:1; padding:9px 4px; border-radius:9px; border:1.5px solid var(--line); background:var(--bg);
+    font-size:17px; line-height:1; position:relative; color:var(--ink-soft); opacity:.55;
   }
+  .flag-toggle.on{opacity:1; background:var(--paper);}
+  .flag-toggle.on.flag-checked{border-color:var(--green); background:#eef5ea;}
+  .flag-toggle.on.flag-fix{border-color:var(--gold); background:#fbf3e2;}
+  .flag-toggle.on.flag-withdraw{border-color:var(--rust); background:#fbeae4;}
+  .flag-toggle.on.flag-continue{border-color:var(--navy); background:#e9eef6;}
+  .flag-toggle .reflect-dot{
+    position:absolute; top:-5px; right:-3px; font-size:9px; background:#2f6b4f; color:#fff;
+    width:13px; height:13px; border-radius:50%; display:flex; align-items:center; justify-content:center;
+  }
+  .flag-toggle:active{transform:scale(.96);}
 
   /* 詳細パネル（モーダル） */
   .sheet-overlay{
@@ -256,12 +271,12 @@
     </div>
 
     <div class="status-grid">
-      <button class="status-btn" data-status="checked"><span class="emoji">✅</span>チェック済み</button>
-      <button class="status-btn" data-status="fix"><span class="emoji">⚠️</span>データ修正要</button>
-      <button class="status-btn" data-status="withdraw"><span class="emoji">🗑</span>除籍候補</button>
-      <button class="status-btn" data-status="continue"><span class="emoji">📖</span>続刊確認</button>
-      <button class="status-btn clear-btn" data-status="">ステータスをクリア</button>
+      <button class="status-btn" data-flag="checked"><span class="emoji">✅</span>チェック済み</button>
+      <button class="status-btn" data-flag="fix"><span class="emoji">⚠️</span>データ修正要</button>
+      <button class="status-btn" data-flag="withdraw"><span class="emoji">🗑</span>除籍候補</button>
+      <button class="status-btn" data-flag="continue"><span class="emoji">📖</span>続刊確認</button>
     </div>
+    <p style="font-size:11px; color:var(--ink-soft); margin:-8px 0 14px;">複数選択できます（もう一度タップでオフ）</p>
 
     <div id="reflectedWrap" style="display:none; margin:-4px 0 10px;">
       <label style="display:flex; align-items:center; gap:8px; padding:11px 12px; border-radius:10px; border:1px solid var(--line); background:var(--bg); font-size:13px; font-weight:700;">
@@ -276,8 +291,7 @@
     <div id="qrLinkWrap"></div>
 
     <div class="sheet-actions">
-      <button class="btn-secondary" id="closeSheetBtn">閉じる</button>
-      <button class="btn-primary" id="saveSheetBtn">保存して次へ</button>
+      <button class="btn-primary" id="closeSheetBtn" style="flex:1;">閉じる</button>
     </div>
   </div>
 </div>
@@ -305,18 +319,37 @@
   var BOOKS_CACHE_KEY = "shelfCheckBooksCache_v1";
   var BOOKS_CACHE_TIME_KEY = "shelfCheckBooksCacheTime_v1";
 
-  var STATUS_META = {
+  var FLAG_META = {
     checked:  {emoji:"✅", label:"チェック済み"},
     fix:      {emoji:"⚠️", label:"データ修正要"},
     withdraw: {emoji:"🗑", label:"除籍候補"},
     continue: {emoji:"📖", label:"続刊確認"}
   };
+  var FLAG_ORDER = ["checked","fix","withdraw","continue"];
 
   var allBooks = [];
-  var statusMap = {};        // id -> {status, memo, updatedAt}
+  var statusMap = {};        // id -> {flags:{checked,fix,withdraw,continue}, memo, reflected, updatedAt}
   var filters = {daibunrui:"", taisho:"", toshoSize:"", seLabel:"", statusView:"all"};
   var currentBookId = null;
   var visibleList = [];
+
+  // 旧データ（status単一値）を新形式（flags集合）に変換
+  function normalizeEntry(entry){
+    if(!entry) return null;
+    if(entry.flags) return entry; // すでに新形式
+    var flags = {};
+    if(entry.status){ flags[entry.status] = true; }
+    return {
+      flags: flags,
+      memo: entry.memo || "",
+      reflected: !!entry.reflected,
+      updatedAt: entry.updatedAt || ""
+    };
+  }
+  function hasAnyFlag(entry){
+    if(!entry || !entry.flags) return false;
+    return FLAG_ORDER.some(function(k){ return entry.flags[k]; });
+  }
 
   // ---------- ユーティリティ ----------
   function $(id){ return document.getElementById(id); }
@@ -335,7 +368,12 @@
   function loadStatusMap(){
     try{
       var raw = localStorage.getItem(STORAGE_KEY);
-      statusMap = raw ? JSON.parse(raw) : {};
+      var parsed = raw ? JSON.parse(raw) : {};
+      statusMap = {};
+      Object.keys(parsed).forEach(function(id){
+        var normalized = normalizeEntry(parsed[id]);
+        if(normalized) statusMap[id] = normalized;
+      });
     }catch(e){ statusMap = {}; }
   }
   function saveStatusMap(){
@@ -558,13 +596,13 @@
     if(filters.taisho && b["対象"] !== filters.taisho) return false;
     if(filters.daibunrui === "読む" && filters.toshoSize && b["図書サイズ"] !== filters.toshoSize) return false;
     if(filters.seLabel && b["背ラベル"] !== filters.seLabel) return false;
-    var entry = statusMap[b.id] || {};
-    var st = entry.status || "";
-    var reflected = !!entry.reflected;
-    if(filters.statusView === "unchecked") return st === "";
-    if(filters.statusView === "fix") return st === "fix" && !reflected;
-    if(filters.statusView === "fix_reflected") return st === "fix" && reflected;
-    if(filters.statusView !== "all" && st !== filters.statusView) return false;
+    var entry = statusMap[b.id];
+    var flags = (entry && entry.flags) || {};
+    var reflected = !!(entry && entry.reflected);
+    if(filters.statusView === "unchecked") return !hasAnyFlag(entry);
+    if(filters.statusView === "fix") return !!flags.fix && !reflected;
+    if(filters.statusView === "fix_reflected") return !!flags.fix && reflected;
+    if(filters.statusView !== "all" && !flags[filters.statusView]) return false;
     return true;
   }
 
@@ -580,8 +618,7 @@
       return true;
     });
     var doneCount = scopeForProgress.filter(function(b){
-      var st = statusMap[b.id] && statusMap[b.id].status;
-      return st && st !== "";
+      return hasAnyFlag(statusMap[b.id]);
     }).length;
     var total = scopeForProgress.length;
     $("progressText").textContent = "この絞り込み " + doneCount + " / " + total + " 件 対応済み";
@@ -595,36 +632,76 @@
     }
 
     var html = visibleList.map(function(b){
-      var entry = statusMap[b.id] || {};
-      var st = entry.status;
-      var badge = st && STATUS_META[st]
-        ? '<span class="status-badge">' + STATUS_META[st].emoji + (st === "fix" && entry.reflected ? '<span style="font-size:12px;">✔️</span>' : "") + '</span>'
-        : "";
+      var entry = statusMap[b.id];
+      var flags = (entry && entry.flags) || {};
+      var hasMemo = !!(entry && entry.memo);
+      var anyFlag = hasAnyFlag(entry);
+
+      var togglesHtml = FLAG_ORDER.map(function(key){
+        var on = !!flags[key];
+        var extra = (key === "fix" && flags.fix && entry.reflected) ? '<span class="reflect-dot">✔</span>' : "";
+        return '<button class="flag-toggle' + (on ? " on flag-" + key : "") + '" data-id="' + escapeHtml(b.id) + '" data-flag="' + key + '">' +
+          FLAG_META[key].emoji + extra + '</button>';
+      }).join("");
+
       var coverHtml = b["書影"]
         ? '<img class="book-cover" src="' + escapeHtml(b["書影"]) + '" alt="" loading="lazy" onerror="this.outerHTML=\'<div class=&quot;book-cover placeholder&quot;>表紙\\nなし</div>\'">'
         : '<div class="book-cover placeholder">表紙<br>なし</div>';
+
+      var memoMarkHtml = hasMemo ? '<span class="memo-dot" title="メモあり">📝</span>' : "";
+
       return (
-        '<div class="book-card' + (st ? " done" : "") + '" data-id="' + escapeHtml(b.id) + '">' +
-          coverHtml +
-          '<div class="book-main">' +
-            '<p class="book-title">' + escapeHtml(b["タイトル"]||"(タイトル不明)") + '</p>' +
-            '<p class="book-author">' + escapeHtml(b["著者"]||"") + '</p>' +
-            '<div class="book-meta">' +
-              '<span class="meta-tag">' + escapeHtml(b["背ラベル"]||"-") + '</span>' +
-              '<span class="meta-tag">' + escapeHtml(b["図書サイズ"]||"-") + '</span>' +
+        '<div class="book-card' + (anyFlag ? " done" : "") + '" data-id="' + escapeHtml(b.id) + '">' +
+          '<div class="book-card-top">' +
+            coverHtml +
+            '<div class="book-main">' +
+              '<p class="book-title">' + escapeHtml(b["タイトル"]||"(タイトル不明)") + memoMarkHtml + '</p>' +
+              '<p class="book-author">' + escapeHtml(b["著者"]||"") + '</p>' +
+              '<div class="book-meta">' +
+                '<span class="meta-tag">' + escapeHtml(b["背ラベル"]||"-") + '</span>' +
+                '<span class="meta-tag">' + escapeHtml(b["図書サイズ"]||"-") + '</span>' +
+              '</div>' +
             '</div>' +
           '</div>' +
-          badge +
+          '<div class="flag-toggle-row">' + togglesHtml + '</div>' +
         '</div>'
       );
     }).join("");
     list.innerHTML = html;
+
+    list.querySelectorAll(".flag-toggle").forEach(function(btn){
+      btn.addEventListener("click", function(e){
+        e.stopPropagation();
+        toggleFlag(btn.getAttribute("data-id"), btn.getAttribute("data-flag"));
+      });
+    });
 
     list.querySelectorAll(".book-card").forEach(function(card){
       card.addEventListener("click", function(){
         openDetail(card.getAttribute("data-id"));
       });
     });
+  }
+
+  function toggleFlag(id, flagKey){
+    var entry = statusMap[id];
+    if(!entry){
+      entry = {flags:{}, memo:"", reflected:false, updatedAt:""};
+    }
+    if(!entry.flags) entry.flags = {};
+    entry.flags[flagKey] = !entry.flags[flagKey];
+    if(flagKey === "fix" && !entry.flags.fix){
+      entry.reflected = false; // 修正要をOFFにしたら反映済みもリセット
+    }
+    entry.updatedAt = new Date().toISOString();
+
+    if(!hasAnyFlag(entry) && !entry.memo){
+      delete statusMap[id];
+    } else {
+      statusMap[id] = entry;
+    }
+    saveStatusMap();
+    renderList();
   }
 
   // ---------- 詳細シート ----------
@@ -634,6 +711,9 @@
   }
 
   function openDetail(id){
+    // 別の本を見ている最中にメモ等を書いていた場合は先に保存する
+    if(currentBookId && currentBookId !== id){ commitMemoAndReflected(); }
+
     var b = findBook(id);
     if(!b) return;
     currentBookId = id;
@@ -648,18 +728,13 @@
       '<span class="meta-tag">' + escapeHtml(b["背ラベル"]||"-") + '</span>' +
       '<span class="meta-tag">' + escapeHtml(b["図書サイズ"]||"-") + '</span>';
 
-    var existing = statusMap[id] || {};
-    $("memoInput").value = existing.memo || "";
-    $("reflectedCheckbox").checked = !!existing.reflected;
+    var existing = statusMap[id];
+    var flags = (existing && existing.flags) || {};
+    $("memoInput").value = (existing && existing.memo) || "";
+    $("reflectedCheckbox").checked = !!(existing && existing.reflected);
 
-    document.querySelectorAll(".status-btn").forEach(function(btn){
-      var s = btn.getAttribute("data-status");
-      btn.classList.remove("sel-checked","sel-fix","sel-withdraw","sel-continue");
-      if(s && s === existing.status){
-        btn.classList.add("sel-" + s);
-      }
-    });
-    updateReflectedVisibility(existing.status || "");
+    refreshSheetToggles(flags);
+    updateReflectedVisibility(flags.fix);
 
     if(b.qr_url){
       $("qrLinkWrap").innerHTML = '<a class="qr-link" href="' + escapeHtml(b.qr_url) + '" target="_blank" rel="noopener">カシカンでこの本を開く ↗</a>';
@@ -670,60 +745,54 @@
     $("detailOverlay").classList.add("open");
   }
 
+  function refreshSheetToggles(flags){
+    document.querySelectorAll(".sheet .status-btn").forEach(function(btn){
+      var key = btn.getAttribute("data-flag");
+      btn.classList.toggle("sel-" + key, !!flags[key]);
+    });
+  }
+
   function closeDetail(){
+    commitMemoAndReflected();
     $("detailOverlay").classList.remove("open");
     currentBookId = null;
   }
 
-  function updateReflectedVisibility(status){
-    $("reflectedWrap").style.display = (status === "fix") ? "" : "none";
+  function updateReflectedVisibility(fixOn){
+    $("reflectedWrap").style.display = fixOn ? "" : "none";
   }
 
-  function setStatusOnCurrent(status){
-    document.querySelectorAll(".status-btn").forEach(function(btn){
-      var s = btn.getAttribute("data-status");
-      btn.classList.remove("sel-checked","sel-fix","sel-withdraw","sel-continue");
-      if(s === status && s !== ""){ btn.classList.add("sel-" + s); }
-    });
-    pendingStatus = status;
-    updateReflectedVisibility(status);
-    if(status !== "fix"){ $("reflectedCheckbox").checked = false; }
-  }
-
-  var pendingStatus = undefined; // undefined=未変更（既存維持）, ""=クリア, それ以外=設定
-
-  function saveCurrentAndNext(){
+  // メモ・反映済みチェックボックスの現在の入力内容を保存する（フラグが何もなくメモも空なら削除）
+  function commitMemoAndReflected(){
     if(!currentBookId) return;
     var memo = $("memoInput").value.trim();
-    var status = pendingStatus !== undefined ? pendingStatus : ((statusMap[currentBookId]&&statusMap[currentBookId].status)||"");
-    var reflected = (status === "fix") && $("reflectedCheckbox").checked;
-    var savedId = currentBookId;
+    var entry = statusMap[currentBookId];
+    var reflected = entry && entry.flags && entry.flags.fix ? $("reflectedCheckbox").checked : false;
 
-    // renderList()でvisibleListが更新される前に、現在の並びでの次の本を特定しておく
-    var idx = visibleList.findIndex(function(b){ return b.id === savedId; });
-    var nextId = (idx >= 0 && idx + 1 < visibleList.length) ? visibleList[idx + 1].id : null;
+    if(!entry){
+      if(!memo) return;
+      entry = {flags:{}, memo:"", reflected:false, updatedAt:""};
+    }
+    entry.memo = memo;
+    entry.reflected = reflected;
+    entry.updatedAt = new Date().toISOString();
 
-    if(!status && !memo){
-      delete statusMap[savedId];
+    if(!hasAnyFlag(entry) && !entry.memo){
+      delete statusMap[currentBookId];
     } else {
-      statusMap[savedId] = {
-        status: status,
-        memo: memo,
-        reflected: reflected,
-        updatedAt: new Date().toISOString()
-      };
+      statusMap[currentBookId] = entry;
     }
     saveStatusMap();
-    pendingStatus = undefined;
-    renderList();
-    showToast(status ? (STATUS_META[status] ? STATUS_META[status].emoji + (reflected ? " 反映済みとして記録" : " 記録しました") : "記録しました") : "クリアしました");
+  }
 
-    if(nextId){
-      openDetail(nextId);
-    } else {
-      closeDetail();
-      if(idx >= 0) showToast("この絞り込みの最後まで進みました");
-    }
+  // 詳細シート内のトグルボタンをタップした時
+  function toggleFlagInSheet(flagKey){
+    if(!currentBookId) return;
+    toggleFlag(currentBookId, flagKey);
+    var entry = statusMap[currentBookId] || {flags:{}};
+    refreshSheetToggles(entry.flags || {});
+    updateReflectedVisibility(entry.flags && entry.flags.fix);
+    if(!(entry.flags && entry.flags.fix)){ $("reflectedCheckbox").checked = false; }
   }
 
   // ---------- メニュー ----------
@@ -731,8 +800,10 @@
     var items = [];
     Object.keys(statusMap).forEach(function(id){
       var entry = statusMap[id];
-      if(!entry || !entry.status && !entry.memo) return;
+      if(!entry || !hasAnyFlag(entry) && !entry.memo) return;
       var b = findBook(id) || {};
+      var flags = entry.flags || {};
+      var flagLabels = FLAG_ORDER.filter(function(k){ return flags[k]; }).map(function(k){ return FLAG_META[k].label; });
       items.push({
         id: id,
         タイトル: b["タイトル"] || "",
@@ -741,8 +812,11 @@
         対象: b["対象"] || "",
         背ラベル: b["背ラベル"] || "",
         ISBN: b["ISBN"] || "",
-        ステータス: entry.status || "",
-        ステータス表示: STATUS_META[entry.status] ? STATUS_META[entry.status].label : "",
+        チェック済み: !!flags.checked,
+        データ修正要: !!flags.fix,
+        除籍候補: !!flags.withdraw,
+        続刊確認: !!flags.continue,
+        ステータス表示: flagLabels.join("、"),
         Excel反映済み: !!entry.reflected,
         メモ: entry.memo || "",
         更新日時: entry.updatedAt || ""
@@ -778,9 +852,10 @@
     var counts = {checked:0, fix:0, fixReflected:0, withdraw:0, continue:0, memoOnly:0};
     Object.keys(statusMap).forEach(function(id){
       var e = statusMap[id];
-      if(e.status && counts.hasOwnProperty(e.status)) counts[e.status]++;
-      else if(!e.status && e.memo) counts.memoOnly++;
-      if(e.status === "fix" && e.reflected) counts.fixReflected++;
+      var flags = e.flags || {};
+      FLAG_ORDER.forEach(function(k){ if(flags[k]) counts[k]++; });
+      if(!hasAnyFlag(e) && e.memo) counts.memoOnly++;
+      if(flags.fix && e.reflected) counts.fixReflected++;
     });
     var msg = "✅" + counts.checked + " ⚠️" + counts.fix + "(✔️反映済" + counts.fixReflected + ") 🗑" + counts.withdraw + " 📖" + counts.continue +
       (counts.memoOnly ? (" 📝のみ" + counts.memoOnly) : "");
@@ -804,18 +879,19 @@
   }
 
   // ---------- イベント結線 ----------
-  document.querySelectorAll(".status-btn").forEach(function(btn){
+  document.querySelectorAll(".sheet .status-btn").forEach(function(btn){
     btn.addEventListener("click", function(){
-      setStatusOnCurrent(btn.getAttribute("data-status"));
+      toggleFlagInSheet(btn.getAttribute("data-flag"));
     });
   });
+  $("reflectedCheckbox").addEventListener("change", commitMemoAndReflected);
+  $("memoInput").addEventListener("blur", commitMemoAndReflected);
   $("closeSheetBtn").addEventListener("click", function(){
-    pendingStatus = undefined;
     closeDetail();
+    renderList();
   });
-  $("saveSheetBtn").addEventListener("click", saveCurrentAndNext);
   $("detailOverlay").addEventListener("click", function(e){
-    if(e.target === $("detailOverlay")){ pendingStatus = undefined; closeDetail(); }
+    if(e.target === $("detailOverlay")){ closeDetail(); renderList(); }
   });
 
   $("fabBtn").addEventListener("click", function(){
