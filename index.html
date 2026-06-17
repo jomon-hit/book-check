@@ -940,6 +940,15 @@
     }
   });
 
+  // ---------- Service Worker登録（オフライン起動対応） ----------
+  if("serviceWorker" in navigator){
+    window.addEventListener("load", function(){
+      navigator.serviceWorker.register("./sw.js").catch(function(err){
+        console.warn("Service Worker登録に失敗:", err);
+      });
+    });
+  }
+
   // ---------- 初期化 ----------
   loadStatusMap();
   loadFilters();
