@@ -521,7 +521,7 @@
 
     // 図書サイズ（「読む」の時だけ表示）
     if(filters.daibunrui === "読む"){
-      var sizeScope = currentScopeBooks("seLabel");
+      var sizeScope = currentScopeBooks("toshoSize");
       var sizeOptions = uniqueOrdered(sizeScope.map(function(b){return b["図書サイズ"];}), TOSHO_SIZE_ORDER);
       $("toshoSizeLabel").style.display = "";
       $("toshoSizeChips").style.display = "";
@@ -830,7 +830,7 @@
     };
   }
 
-  var SHEET_WEBAPP_URL = "https://script.google.com/macros/s/【ここにGASのデプロイURLを貼る】/exec";
+  var SHEET_WEBAPP_URL = "https://script.google.com/macros/s/AKfycbzP0IUozjt_WdMtLpbtMMgKDg8dnJzC8KHiY6eIGgMBJf8xvviUCCHsiwPaUK7eZDRd5g/exec";
 
   function sendToSheet(){
     var payload = buildExportPayload();
