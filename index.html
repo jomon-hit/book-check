@@ -128,6 +128,16 @@
   }
   .flag-toggle:active{transform:scale(.96);}
 
+  .verify-row{display:flex; gap:6px; margin-top:8px;}
+  .verify-toggle{
+    flex:1; padding:8px 6px; border-radius:9px; border:1.5px dashed var(--line); background:var(--bg);
+    font-size:12px; font-weight:700; color:var(--ink-soft); display:flex; align-items:center; justify-content:center; gap:4px;
+  }
+  .verify-toggle .vmark{font-size:13px; opacity:.4;}
+  .verify-toggle.on{border-style:solid; border-color:var(--green); background:#eef5ea; color:var(--green);}
+  .verify-toggle.on .vmark{opacity:1;}
+  .verify-toggle:active{transform:scale(.96);}
+
   /* 詳細パネル（モーダル） */
   .sheet-overlay{
     position:fixed; inset:0; background:rgba(30,25,15,0.45); z-index:50;
@@ -332,6 +342,7 @@
 
   var allBooks = [];
   var statusMap = {};        // id -> {flags:{checked,fix,withdraw,continue}, memo, reflected, updatedAt}
+  var verifyState = {};      // id -> {bookcard:bool, label:bool}  ※保存しない揮発性の確認状態
   var filters = {daibunrui:"", taisho:"", toshoSize:"", seLabel:"", statusView:"all"};
   var currentBookId = null;
   var visibleList = [];
@@ -594,6 +605,84 @@
   }
 
   // ---------- リスト表示 ----------
+  function buildCardHtml(b){
+    var entry = statusMap[b.id];
+    var flags = (entry && entry.flags) || {};
+    var hasMemo = !!(entry && entry.memo);
+    var anyFlag = hasAnyFlag(entry);
+    var vstate = verifyState[b.id] || {bookcard:false, label:false};
+
+    var togglesHtml = FLAG_ORDER.map(function(key){
+      var on = !!flags[key];
+      var extra = (key === "fix" && flags.fix && entry.reflected) ? '<span class="reflect-dot">✔</span>' : "";
+      return '<button class="flag-toggle' + (on ? " on flag-" + key : "") + '" data-id="' + escapeHtml(b.id) + '" data-flag="' + key + '">' +
+        FLAG_META[key].emoji + extra + '</button>';
+    }).join("");
+
+    var verifyHtml =
+      '<button class="verify-toggle' + (vstate.bookcard ? " on" : "") + '" data-id="' + escapeHtml(b.id) + '" data-verify="bookcard">' +
+        '<span class="vmark">✓</span>ブックカード</button>' +
+      '<button class="verify-toggle' + (vstate.label ? " on" : "") + '" data-id="' + escapeHtml(b.id) + '" data-verify="label">' +
+        '<span class="vmark">✓</span>ラベル</button>';
+
+    var coverHtml = b["書影"]
+      ? '<img class="book-cover" src="' + escapeHtml(b["書影"]) + '" alt="" loading="lazy" onerror="this.outerHTML=\'<div class=&quot;book-cover placeholder&quot;>表紙\\nなし</div>\'">'
+      : '<div class="book-cover placeholder">表紙<br>なし</div>';
+
+    var memoMarkHtml = hasMemo ? '<span class="memo-dot" title="メモあり">📝</span>' : "";
+
+    return (
+      '<div class="book-card' + (anyFlag ? " done" : "") + '" data-id="' + escapeHtml(b.id) + '">' +
+        '<div class="book-card-top">' +
+          coverHtml +
+          '<div class="book-main">' +
+            '<p class="book-title">' + escapeHtml(b["タイトル"]||"(タイトル不明)") + memoMarkHtml + '</p>' +
+            '<p class="book-author">' + escapeHtml(b["著者"]||"") + '</p>' +
+            '<div class="book-meta">' +
+              '<span class="meta-tag">' + escapeHtml(b["背ラベル"]||"-") + '</span>' +
+              '<span class="meta-tag">' + escapeHtml(b["図書サイズ"]||"-") + '</span>' +
+            '</div>' +
+          '</div>' +
+        '</div>' +
+        '<div class="verify-row">' + verifyHtml + '</div>' +
+        '<div class="flag-toggle-row">' + togglesHtml + '</div>' +
+      '</div>'
+    );
+  }
+
+  function bindCardEvents(card){
+    card.querySelectorAll(".verify-toggle").forEach(function(btn){
+      btn.addEventListener("click", function(e){
+        e.stopPropagation();
+        toggleVerify(btn.getAttribute("data-id"), btn.getAttribute("data-verify"));
+      });
+    });
+    card.querySelectorAll(".flag-toggle").forEach(function(btn){
+      btn.addEventListener("click", function(e){
+        e.stopPropagation();
+        toggleFlag(btn.getAttribute("data-id"), btn.getAttribute("data-flag"));
+      });
+    });
+    card.addEventListener("click", function(){
+      openDetail(card.getAttribute("data-id"));
+    });
+  }
+
+  // 1冊だけ状態が変わった時、リスト全体を再構築せずそのカードだけ差し替える（高速化）
+  function updateSingleCard(id){
+    var book = findBook(id);
+    if(!book) return false;
+    var oldCard = document.querySelector('#bookList .book-card[data-id="' + id.replace(/"/g, '\\"') + '"]');
+    if(!oldCard) return false;
+    var wrapper = document.createElement("div");
+    wrapper.innerHTML = buildCardHtml(book);
+    var newCard = wrapper.firstChild;
+    bindCardEvents(newCard);
+    oldCard.replaceWith(newCard);
+    return true;
+  }
+
+
   function matchesFilters(b){
     if(filters.daibunrui && b["大分類"] !== filters.daibunrui) return false;
     if(filters.taisho && b["対象"] !== filters.taisho) return false;
@@ -634,43 +723,15 @@
       return;
     }
 
-    var html = visibleList.map(function(b){
-      var entry = statusMap[b.id];
-      var flags = (entry && entry.flags) || {};
-      var hasMemo = !!(entry && entry.memo);
-      var anyFlag = hasAnyFlag(entry);
-
-      var togglesHtml = FLAG_ORDER.map(function(key){
-        var on = !!flags[key];
-        var extra = (key === "fix" && flags.fix && entry.reflected) ? '<span class="reflect-dot">✔</span>' : "";
-        return '<button class="flag-toggle' + (on ? " on flag-" + key : "") + '" data-id="' + escapeHtml(b.id) + '" data-flag="' + key + '">' +
-          FLAG_META[key].emoji + extra + '</button>';
-      }).join("");
-
-      var coverHtml = b["書影"]
-        ? '<img class="book-cover" src="' + escapeHtml(b["書影"]) + '" alt="" loading="lazy" onerror="this.outerHTML=\'<div class=&quot;book-cover placeholder&quot;>表紙\\nなし</div>\'">'
-        : '<div class="book-cover placeholder">表紙<br>なし</div>';
-
-      var memoMarkHtml = hasMemo ? '<span class="memo-dot" title="メモあり">📝</span>' : "";
-
-      return (
-        '<div class="book-card' + (anyFlag ? " done" : "") + '" data-id="' + escapeHtml(b.id) + '">' +
-          '<div class="book-card-top">' +
-            coverHtml +
-            '<div class="book-main">' +
-              '<p class="book-title">' + escapeHtml(b["タイトル"]||"(タイトル不明)") + memoMarkHtml + '</p>' +
-              '<p class="book-author">' + escapeHtml(b["著者"]||"") + '</p>' +
-              '<div class="book-meta">' +
-                '<span class="meta-tag">' + escapeHtml(b["背ラベル"]||"-") + '</span>' +
-                '<span class="meta-tag">' + escapeHtml(b["図書サイズ"]||"-") + '</span>' +
-              '</div>' +
-            '</div>' +
-          '</div>' +
-          '<div class="flag-toggle-row">' + togglesHtml + '</div>' +
-        '</div>'
-      );
-    }).join("");
+    var html = visibleList.map(buildCardHtml).join("");
     list.innerHTML = html;
+
+    list.querySelectorAll(".verify-toggle").forEach(function(btn){
+      btn.addEventListener("click", function(e){
+        e.stopPropagation();
+        toggleVerify(btn.getAttribute("data-id"), btn.getAttribute("data-verify"));
+      });
+    });
 
     list.querySelectorAll(".flag-toggle").forEach(function(btn){
       btn.addEventListener("click", function(e){
@@ -685,6 +746,42 @@
       });
     });
   }
+
+  function toggleVerify(id, key){
+    var v = verifyState[id] || {bookcard:false, label:false};
+    v[key] = !v[key];
+    verifyState[id] = v;
+
+    if(v.bookcard && v.label){
+      // 両方OKになった瞬間、チェック済みを自動ON（まだONでなければ）
+      var entry = statusMap[id];
+      if(!entry || !entry.flags || !entry.flags.checked){
+        if(!entry){ entry = {flags:{}, memo:"", reflected:false, updatedAt:""}; }
+        if(!entry.flags) entry.flags = {};
+        entry.flags.checked = true;
+        entry.updatedAt = new Date().toISOString();
+        statusMap[id] = entry;
+        saveStatusMap();
+      }
+      delete verifyState[id]; // 確認状態は使い終わったらリセット（次にこの本を見る時はまた未確認から）
+      renderList();
+      scrollToNextCard(id);
+      return;
+    }
+    renderList();
+  }
+
+  function scrollToNextCard(currentId){
+    var idx = visibleList.findIndex(function(b){ return b.id === currentId; });
+    if(idx < 0) return;
+    var nextBook = visibleList[idx + 1];
+    if(!nextBook) return;
+    var nextCard = document.querySelector('.book-card[data-id="' + nextBook.id.replace(/"/g, '\\"') + '"]');
+    if(nextCard && nextCard.scrollIntoView){
+      nextCard.scrollIntoView({behavior:"smooth", block:"center"});
+    }
+  }
+
 
   function toggleFlag(id, flagKey){
     var entry = statusMap[id];
