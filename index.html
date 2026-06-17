@@ -300,7 +300,7 @@
 <div class="fab-menu-overlay" id="fabOverlay">
   <div class="fab-menu">
     <h3>メニュー</h3>
-    <button class="menu-item" id="exportJsonBtn"><span class="em">⬇️</span>点検結果をJSONで書き出す</button>
+    <button class="menu-item" id="sendToSheetBtn"><span class="em">📤</span>点検結果をスプレッドシートに送信</button>
     <button class="menu-item" id="showOnlyUncheckedBtn"><span class="em">👁</span><span id="toggleUncheckedLabel">未チェックのみ表示にする</span></button>
     <button class="menu-item" id="statsBtn"><span class="em">📊</span>点検状況の全体サマリー</button>
     <button class="menu-item danger" id="resetBtn"><span class="em">🗑</span>この絞り込みの点検状況をリセット</button>
@@ -830,22 +830,42 @@
     };
   }
 
-  function exportJson(){
+  var SHEET_WEBAPP_URL = "https://script.google.com/macros/s/【ここにGASのデプロイURLを貼る】/exec";
+
+  function sendToSheet(){
     var payload = buildExportPayload();
     if(payload.items.length === 0){
       showToast("まだ記録がありません");
       return;
     }
-    var blob = new Blob([JSON.stringify(payload, null, 2)], {type:"application/json"});
-    var url = URL.createObjectURL(blob);
-    var a = document.createElement("a");
-    var ts = new Date();
-    var pad = function(n){ return String(n).padStart(2,"0"); };
-    var fname = "shelfcheck_" + ts.getFullYear() + pad(ts.getMonth()+1) + pad(ts.getDate()) + "_" + pad(ts.getHours()) + pad(ts.getMinutes()) + ".json";
-    a.href = url; a.download = fname;
-    document.body.appendChild(a); a.click();
-    setTimeout(function(){ document.body.removeChild(a); URL.revokeObjectURL(url); }, 500);
-    showToast(payload.items.length + "件を書き出しました");
+    if(SHEET_WEBAPP_URL.indexOf("【") !== -1){
+      showToast("送信先が未設定です（管理者に連絡してください）");
+      return;
+    }
+
+    var btn = $("sendToSheetBtn");
+    var originalLabel = btn.innerHTML;
+    btn.innerHTML = '<span class="em">⏳</span>送信中…';
+    btn.disabled = true;
+
+    fetch(SHEET_WEBAPP_URL, {
+      method: "POST",
+      mode: "no-cors",
+      headers: {"Content-Type": "text/plain;charset=utf-8"},
+      body: JSON.stringify(payload)
+    })
+    .then(function(){
+      // no-cors時はレスポンス内容を読めないため、通信が完了したことのみで成功とみなす
+      showToast(payload.items.length + "件をスプレッドシートに送信しました");
+      $("fabOverlay").classList.remove("open");
+    })
+    .catch(function(err){
+      showToast("送信に失敗しました。Wi-Fiを確認してください");
+    })
+    .finally(function(){
+      btn.innerHTML = originalLabel;
+      btn.disabled = false;
+    });
   }
 
   function showStatsSummary(){
@@ -900,7 +920,7 @@
   $("fabOverlay").addEventListener("click", function(e){
     if(e.target === $("fabOverlay")) $("fabOverlay").classList.remove("open");
   });
-  $("exportJsonBtn").addEventListener("click", function(){ $("fabOverlay").classList.remove("open"); exportJson(); });
+  $("sendToSheetBtn").addEventListener("click", function(){ sendToSheet(); });
   $("statsBtn").addEventListener("click", function(){ $("fabOverlay").classList.remove("open"); showStatsSummary(); });
   $("resetBtn").addEventListener("click", function(){ $("fabOverlay").classList.remove("open"); resetCurrentScope(); });
   $("showOnlyUncheckedBtn").addEventListener("click", function(){
