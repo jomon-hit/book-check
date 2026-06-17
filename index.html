@@ -348,6 +348,7 @@
   var filters = {daibunrui:"", taisho:"", toshoSize:"", seLabel:"", statusView:"all"};
   var currentBookId = null;
   var visibleList = [];
+  var lastSeLabelOptions = [];
 
   // 旧データ（status単一値）を新形式（flags集合）に変換
   function normalizeEntry(entry){
@@ -567,6 +568,7 @@
       var books = seGroups[opt.value] || [];
       opt.complete = books.length > 0 && books.every(function(b){ return hasAnyFlag(statusMap[b.id]); });
     });
+    lastSeLabelOptions = seOptions;
     renderChipRow("seLabelChips", seOptions, filters.seLabel, function(val){
       filters.seLabel = (filters.seLabel === val) ? "" : val;
       saveFilters(); renderList();
@@ -590,6 +592,27 @@
       chip.addEventListener("click", function(){ onClick(opt.value); });
       el.appendChild(chip);
     });
+  }
+
+  // 現在選んでいる背ラベルが全部対応済みになっていたら、表示順で次の背ラベルへ自動的に切り替える
+  function advanceToNextSeLabelIfComplete(){
+    if(!filters.seLabel) return false;
+    var idx = lastSeLabelOptions.findIndex(function(opt){ return opt.value === filters.seLabel; });
+    if(idx < 0) return false;
+    var current = lastSeLabelOptions[idx];
+    if(!current.complete) return false;
+
+    var next = lastSeLabelOptions[idx + 1];
+    if(next){
+      filters.seLabel = next.value;
+      saveFilters();
+      showToast("「" + current.value + "」完了 → 「" + next.value + "」へ");
+    } else {
+      filters.seLabel = "";
+      saveFilters();
+      showToast("「" + current.value + "」が最後の背ラベルでした。全て完了！");
+    }
+    return true;
   }
 
   function renderStatusFilterChips(){
@@ -779,8 +802,14 @@
       }
       delete verifyState[id]; // 確認状態は使い終わったらリセット（次にこの本を見る時はまた未確認から）
       buildFilterChips();
-      renderList();
-      scrollToNextCard(id);
+      var advanced = advanceToNextSeLabelIfComplete();
+      if(advanced){
+        buildFilterChips();
+        renderList();
+      } else {
+        renderList();
+        scrollToNextCard(id);
+      }
       return;
     }
     renderList();
@@ -817,6 +846,8 @@
     }
     saveStatusMap();
     buildFilterChips();
+    var advanced = advanceToNextSeLabelIfComplete();
+    if(advanced){ buildFilterChips(); }
     renderList();
   }
 
