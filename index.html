@@ -64,6 +64,8 @@
     white-space:nowrap;
   }
   .chip.active{background:var(--navy); color:#fff; border-color:var(--navy); font-weight:700;}
+  .chip.chip-complete{border-color:var(--green); background:#eef5ea; color:var(--green); font-weight:700;}
+  .chip.chip-complete.active{background:var(--green); color:#fff; border-color:var(--green);}
   .chip .count{opacity:.65; font-size:11px; margin-left:2px;}
 
   .filter-row-label{font-size:10px; color:var(--ink-soft); padding:8px 14px 0; letter-spacing:.08em;}
@@ -553,6 +555,18 @@
     // 背ラベル（大分類・対象・図書サイズで絞った範囲内）
     var seScope = currentScopeBooks("seLabel");
     var seOptions = uniqueOrdered(seScope.map(function(b){return b["背ラベル"];}), []);
+    // 各背ラベルについて、その範囲内の本が全部「対応済み」かどうかを判定
+    var seGroups = {};
+    seScope.forEach(function(b){
+      var key = b["背ラベル"];
+      if(!key) return;
+      if(!seGroups[key]) seGroups[key] = [];
+      seGroups[key].push(b);
+    });
+    seOptions.forEach(function(opt){
+      var books = seGroups[opt.value] || [];
+      opt.complete = books.length > 0 && books.every(function(b){ return hasAnyFlag(statusMap[b.id]); });
+    });
     renderChipRow("seLabelChips", seOptions, filters.seLabel, function(val){
       filters.seLabel = (filters.seLabel === val) ? "" : val;
       saveFilters(); renderList();
@@ -571,7 +585,7 @@
     el.innerHTML = "";
     options.forEach(function(opt){
       var chip = document.createElement("button");
-      chip.className = "chip" + (opt.value === activeValue ? " active" : "");
+      chip.className = "chip" + (opt.value === activeValue ? " active" : "") + (opt.complete ? " chip-complete" : "");
       chip.innerHTML = escapeHtml(opt.value) + (showCount ? '<span class="count">' + opt.count + '</span>' : "");
       chip.addEventListener("click", function(){ onClick(opt.value); });
       el.appendChild(chip);
@@ -764,6 +778,7 @@
         saveStatusMap();
       }
       delete verifyState[id]; // 確認状態は使い終わったらリセット（次にこの本を見る時はまた未確認から）
+      buildFilterChips();
       renderList();
       scrollToNextCard(id);
       return;
@@ -801,6 +816,7 @@
       statusMap[id] = entry;
     }
     saveStatusMap();
+    buildFilterChips();
     renderList();
   }
 
@@ -994,6 +1010,7 @@
     if(!confirm("現在の絞り込み（" + scopeIds.length + "件）の点検状況をリセットします。よろしいですか？")) return;
     scopeIds.forEach(function(id){ delete statusMap[id]; });
     saveStatusMap();
+    buildFilterChips();
     renderList();
     showToast("リセットしました");
   }
