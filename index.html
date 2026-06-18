@@ -699,13 +699,16 @@
         e.stopPropagation();
         var id = btn.getAttribute("data-id");
         var flagKey = btn.getAttribute("data-flag");
-        toggleFlag(id, flagKey);
         if(flagKey === "fix"){
-          // データ修正要はONにした直後にメモを書きやすいよう詳細シートを開く
+          // fixはON/OFF両方skipAutoAdvanceで呼ぶ（メモ記入フローに入るため自動進行しない）
+          toggleFlag(id, flagKey, true);
           var entry = statusMap[id];
           if(entry && entry.flags && entry.flags.fix){
+            // fixをONにした時だけ詳細シートを開く
             openDetail(id);
           }
+        } else {
+          toggleFlag(id, flagKey);
         }
       });
     });
@@ -836,7 +839,7 @@
   }
 
 
-  function toggleFlag(id, flagKey){
+  function toggleFlag(id, flagKey, skipAutoAdvance){
     var entry = statusMap[id];
     if(!entry){
       entry = {flags:{}, memo:"", reflected:false, updatedAt:""};
@@ -855,8 +858,10 @@
     }
     saveStatusMap();
     buildFilterChips();
-    var advanced = advanceToNextSeLabelIfComplete();
-    if(advanced){ buildFilterChips(); }
+    if(!skipAutoAdvance){
+      var advanced = advanceToNextSeLabelIfComplete();
+      if(advanced){ buildFilterChips(); }
+    }
     renderList();
   }
 
