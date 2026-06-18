@@ -697,7 +697,16 @@
     card.querySelectorAll(".flag-toggle").forEach(function(btn){
       btn.addEventListener("click", function(e){
         e.stopPropagation();
-        toggleFlag(btn.getAttribute("data-id"), btn.getAttribute("data-flag"));
+        var id = btn.getAttribute("data-id");
+        var flagKey = btn.getAttribute("data-flag");
+        toggleFlag(id, flagKey);
+        if(flagKey === "fix"){
+          // データ修正要はONにした直後にメモを書きやすいよう詳細シートを開く
+          var entry = statusMap[id];
+          if(entry && entry.flags && entry.flags.fix){
+            openDetail(id);
+          }
+        }
       });
     });
     card.addEventListener("click", function(){
