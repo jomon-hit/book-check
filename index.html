@@ -782,51 +782,6 @@
     );
   }
 
-  function bindCardEvents(card){
-    card.querySelectorAll(".verify-toggle").forEach(function(btn){
-      btn.addEventListener("click", function(e){
-        e.stopPropagation();
-        toggleVerify(btn.getAttribute("data-id"), btn.getAttribute("data-verify"));
-      });
-    });
-    card.querySelectorAll(".flag-toggle").forEach(function(btn){
-      btn.addEventListener("click", function(e){
-        e.stopPropagation();
-        var id = btn.getAttribute("data-id");
-        var flagKey = btn.getAttribute("data-flag");
-        if(flagKey === "fix"){
-          // fixはON/OFF両方skipAutoAdvanceで呼ぶ（メモ記入フローに入るため自動進行しない）
-          toggleFlag(id, flagKey, true);
-          var entry = statusMap[id];
-          if(entry && entry.flags && entry.flags.fix){
-            // fixをONにした時だけ詳細シートを開く
-            openDetail(id);
-          }
-        } else {
-          toggleFlag(id, flagKey);
-        }
-      });
-    });
-    card.addEventListener("click", function(){
-      openDetail(card.getAttribute("data-id"));
-    });
-  }
-
-  // 1冊だけ状態が変わった時、リスト全体を再構築せずそのカードだけ差し替える（高速化）
-  function updateSingleCard(id){
-    var book = findBook(id);
-    if(!book) return false;
-    var oldCard = document.querySelector('#bookList .book-card[data-id="' + id.replace(/"/g, '\\"') + '"]');
-    if(!oldCard) return false;
-    var wrapper = document.createElement("div");
-    wrapper.innerHTML = buildCardHtml(book);
-    var newCard = wrapper.firstChild;
-    bindCardEvents(newCard);
-    oldCard.replaceWith(newCard);
-    return true;
-  }
-
-
   function matchesFilters(b){
     if(filters.daibunrui && b["大分類"] !== filters.daibunrui) return false;
     if(filters.taisho && b["対象"] !== filters.taisho) return false;
@@ -880,7 +835,19 @@
     list.querySelectorAll(".flag-toggle").forEach(function(btn){
       btn.addEventListener("click", function(e){
         e.stopPropagation();
-        toggleFlag(btn.getAttribute("data-id"), btn.getAttribute("data-flag"));
+        var id = btn.getAttribute("data-id");
+        var flagKey = btn.getAttribute("data-flag");
+        if(flagKey === "fix"){
+          // fixはON/OFF両方skipAutoAdvanceで呼ぶ（メモ記入フローに入るため自動進行しない）
+          toggleFlag(id, flagKey, true);
+          var entry = statusMap[id];
+          if(entry && entry.flags && entry.flags.fix){
+            // fixをONにした時だけ詳細シートを開く
+            openDetail(id);
+          }
+        } else {
+          toggleFlag(id, flagKey);
+        }
       });
     });
 
