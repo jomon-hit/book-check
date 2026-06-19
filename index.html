@@ -209,6 +209,41 @@
   .menu-item .em{font-size:18px; width:24px; text-align:center;}
   .menu-item.danger{color:var(--rust);}
 
+  /* 進捗一覧ページ */
+  .progress-page-overlay{
+    position:fixed; inset:0; background:var(--bg); z-index:70;
+    transform:translateX(100%); transition:transform .25s ease;
+    display:flex; flex-direction:column;
+  }
+  .progress-page-overlay.open{transform:translateX(0);}
+  .progress-page{display:flex; flex-direction:column; height:100%;}
+  .progress-page-header{
+    display:flex; align-items:center; gap:10px; padding:12px 14px;
+    background:var(--paper); border-bottom:1px solid var(--line); box-shadow:var(--shadow);
+  }
+  .progress-page-header h2{font-size:15px; margin:0; flex:1;}
+  .progress-page-count{font-size:12px; color:var(--ink-soft);}
+  .progress-page-body{flex:1; overflow-y:auto; padding:10px 14px 30px;}
+
+  .progress-empty{padding:60px 20px; text-align:center; color:var(--ink-soft); font-size:13px; line-height:1.8;}
+
+  .progress-entry{
+    background:var(--paper); border:1px solid var(--line); border-radius:12px;
+    padding:12px 14px; margin-bottom:8px; box-shadow:var(--shadow);
+  }
+  .progress-entry-path{font-size:13px; font-weight:700; color:var(--ink); margin-bottom:3px;}
+  .progress-entry-path .sep{color:var(--ink-soft); font-weight:400; margin:0 3px;}
+  .progress-entry-meta{display:flex; justify-content:space-between; align-items:center; font-size:11px; color:var(--ink-soft);}
+  .progress-entry-badge{
+    display:inline-flex; align-items:center; gap:3px; font-size:11px; color:var(--green); font-weight:700;
+  }
+
+  .progress-day-label{
+    font-size:11px; color:var(--ink-soft); margin:14px 0 6px; padding-bottom:4px;
+    border-bottom:1px solid var(--line);
+  }
+  .progress-day-label:first-child{margin-top:0;}
+
   .fab{
     position:fixed; bottom:18px; right:18px; z-index:40;
     width:54px; height:54px; border-radius:50%; background:var(--navy); color:#fff;
@@ -315,10 +350,23 @@
 <div class="fab-menu-overlay" id="fabOverlay">
   <div class="fab-menu">
     <h3>メニュー</h3>
+    <button class="menu-item" id="progressLogBtn"><span class="em">📋</span>進捗一覧を見る</button>
     <button class="menu-item" id="sendToSheetBtn"><span class="em">📤</span>点検結果をスプレッドシートに送信</button>
     <button class="menu-item" id="showOnlyUncheckedBtn"><span class="em">👁</span><span id="toggleUncheckedLabel">未チェックのみ表示にする</span></button>
     <button class="menu-item" id="statsBtn"><span class="em">📊</span>点検状況の全体サマリー</button>
     <button class="menu-item danger" id="resetBtn"><span class="em">🗑</span>この絞り込みの点検状況をリセット</button>
+  </div>
+</div>
+
+<!-- 進捗一覧画面 -->
+<div class="progress-page-overlay" id="progressPageOverlay">
+  <div class="progress-page">
+    <div class="progress-page-header">
+      <button class="icon-btn" id="progressPageCloseBtn">←</button>
+      <h2>進捗一覧</h2>
+      <span class="progress-page-count" id="progressPageCount"></span>
+    </div>
+    <div class="progress-page-body" id="progressPageBody"></div>
   </div>
 </div>
 
@@ -333,6 +381,7 @@
   var FILTER_KEY = "shelfCheckFilters_v1";
   var BOOKS_CACHE_KEY = "shelfCheckBooksCache_v1";
   var BOOKS_CACHE_TIME_KEY = "shelfCheckBooksCacheTime_v1";
+  var PROGRESS_LOG_KEY = "shelfCheckProgressLog_v1";
 
   var FLAG_META = {
     checked:  {emoji:"✅", label:"チェック済み"},
@@ -349,6 +398,7 @@
   var currentBookId = null;
   var visibleList = [];
   var lastSeLabelOptions = [];
+  var progressLog = []; // {daibunrui, taisho, toshoSize, seLabel, count, completedAt}
 
   // 旧データ（status単一値）を新形式（flags集合）に変換
   function normalizeEntry(entry){
@@ -400,6 +450,36 @@
       showToast("保存に失敗しました（容量制限の可能性）");
     }
   }
+
+  function loadProgressLog(){
+    try{
+      var raw = localStorage.getItem(PROGRESS_LOG_KEY);
+      progressLog = raw ? JSON.parse(raw) : [];
+    }catch(e){ progressLog = []; }
+  }
+  function saveProgressLog(){
+    try{
+      localStorage.setItem(PROGRESS_LOG_KEY, JSON.stringify(progressLog));
+    }catch(e){
+      showToast("進捗記録の保存に失敗しました");
+    }
+  }
+  function clearProgressLog(){
+    progressLog = [];
+    try{ localStorage.removeItem(PROGRESS_LOG_KEY); }catch(e){}
+  }
+  function addProgressLogEntry(daibunrui, taisho, toshoSize, seLabel, count){
+    // 同じ組み合わせが既にあれば古い記録を消してから先頭に追加（最新の完了時刻に更新）
+    progressLog = progressLog.filter(function(e){
+      return !(e.daibunrui===daibunrui && e.taisho===taisho && e.toshoSize===toshoSize && e.seLabel===seLabel);
+    });
+    progressLog.unshift({
+      daibunrui: daibunrui, taisho: taisho, toshoSize: toshoSize || "", seLabel: seLabel,
+      count: count, completedAt: new Date().toISOString()
+    });
+    saveProgressLog();
+  }
+
   function loadFilters(){
     try{
       var raw = localStorage.getItem(FILTER_KEY);
@@ -459,7 +539,7 @@
     }
   }
 
-  function fetchFromNetwork(){
+  function fetchFromNetwork(isManualReload){
     $("bookList").innerHTML = '<div class="loading"><div class="spinner"></div>最新の蔵書データを読み込んでいます…</div>';
     $("filterArea").style.display = "none";
     var url = BOOKS_URL + "?t=" + Date.now();
@@ -470,7 +550,12 @@
       })
       .then(function(data){
         applyBooksData(data, true);
-        showToast("最新データを取得しました");
+        if(isManualReload){
+          clearProgressLog();
+          showToast("最新データを取得しました（進捗一覧もリセットされました）");
+        } else {
+          showToast("最新データを取得しました");
+        }
       })
       .catch(function(err){
         var cached = loadBooksFromCache();
@@ -517,10 +602,27 @@
     });
   }
 
+  // 指定したフィールドでoptionsをグルーピングし、各グループ内の本が全部「対応済み」かどうかを付与する
+  function markCompleteByField(options, scopeBooks, fieldName){
+    var groups = {};
+    scopeBooks.forEach(function(b){
+      var key = b[fieldName];
+      if(!key) return;
+      if(!groups[key]) groups[key] = [];
+      groups[key].push(b);
+    });
+    options.forEach(function(opt){
+      var books = groups[opt.value] || [];
+      opt.complete = books.length > 0 && books.every(function(b){ return hasAnyFlag(statusMap[b.id]); });
+    });
+    return options;
+  }
+
   function buildFilterChips(){
     // 大分類
     var daiScope = allBooks;
     var daiOptions = uniqueOrdered(daiScope.map(function(b){return b["大分類"];}), DAIBUNRUI_ORDER);
+    markCompleteByField(daiOptions, daiScope, "大分類");
     renderChipRow("daibunruiChips", daiOptions, filters.daibunrui, function(val){
       filters.daibunrui = (filters.daibunrui === val) ? "" : val;
       filters.taisho = ""; filters.toshoSize = ""; filters.seLabel = "";
@@ -530,6 +632,7 @@
     // 対象（大分類で絞った範囲内）
     var taishoScope = currentScopeBooks("taisho");
     var taishoOptions = uniqueOrdered(taishoScope.map(function(b){return b["対象"];}), TAISHO_ORDER);
+    markCompleteByField(taishoOptions, taishoScope, "対象");
     renderChipRow("taishoChips", taishoOptions, filters.taisho, function(val){
       filters.taisho = (filters.taisho === val) ? "" : val;
       filters.toshoSize = ""; filters.seLabel = "";
@@ -540,6 +643,7 @@
     if(filters.daibunrui === "読む"){
       var sizeScope = currentScopeBooks("toshoSize");
       var sizeOptions = uniqueOrdered(sizeScope.map(function(b){return b["図書サイズ"];}), TOSHO_SIZE_ORDER);
+      markCompleteByField(sizeOptions, sizeScope, "図書サイズ");
       $("toshoSizeLabel").style.display = "";
       $("toshoSizeChips").style.display = "";
       renderChipRow("toshoSizeChips", sizeOptions, filters.toshoSize, function(val){
@@ -556,18 +660,7 @@
     // 背ラベル（大分類・対象・図書サイズで絞った範囲内）
     var seScope = currentScopeBooks("seLabel");
     var seOptions = uniqueOrdered(seScope.map(function(b){return b["背ラベル"];}), []);
-    // 各背ラベルについて、その範囲内の本が全部「対応済み」かどうかを判定
-    var seGroups = {};
-    seScope.forEach(function(b){
-      var key = b["背ラベル"];
-      if(!key) return;
-      if(!seGroups[key]) seGroups[key] = [];
-      seGroups[key].push(b);
-    });
-    seOptions.forEach(function(opt){
-      var books = seGroups[opt.value] || [];
-      opt.complete = books.length > 0 && books.every(function(b){ return hasAnyFlag(statusMap[b.id]); });
-    });
+    markCompleteByField(seOptions, seScope, "背ラベル");
     lastSeLabelOptions = seOptions;
     renderChipRow("seLabelChips", seOptions, filters.seLabel, function(val){
       filters.seLabel = (filters.seLabel === val) ? "" : val;
@@ -601,6 +694,8 @@
     if(idx < 0) return false;
     var current = lastSeLabelOptions[idx];
     if(!current.complete) return false;
+
+    addProgressLogEntry(filters.daibunrui, filters.taisho, filters.toshoSize, current.value, current.count);
 
     var next = lastSeLabelOptions[idx + 1];
     if(next){
@@ -1029,6 +1124,57 @@
     });
   }
 
+  function dateKeyOf(isoString){
+    var d = new Date(isoString);
+    return d.getFullYear() + "/" + (d.getMonth()+1) + "/" + d.getDate();
+  }
+  function timeLabelOf(isoString){
+    var d = new Date(isoString);
+    var pad = function(n){ return String(n).padStart(2,"0"); };
+    return pad(d.getHours()) + ":" + pad(d.getMinutes());
+  }
+
+  function renderProgressPage(){
+    $("progressPageCount").textContent = progressLog.length + "件 完了";
+    var body = $("progressPageBody");
+    if(progressLog.length === 0){
+      body.innerHTML = '<div class="progress-empty">まだ完了した背ラベルはありません。<br>背ラベルの中の本が全部対応済みになると、ここに記録されます。</div>';
+      return;
+    }
+
+    var html = "";
+    var lastDateKey = null;
+    progressLog.forEach(function(entry){
+      var dKey = dateKeyOf(entry.completedAt);
+      if(dKey !== lastDateKey){
+        html += '<div class="progress-day-label">' + dKey + '</div>';
+        lastDateKey = dKey;
+      }
+      var pathParts = [entry.daibunrui, entry.taisho];
+      if(entry.toshoSize) pathParts.push(entry.toshoSize);
+      pathParts.push(entry.seLabel);
+      var pathHtml = pathParts.map(escapeHtml).join('<span class="sep">›</span>');
+
+      html +=
+        '<div class="progress-entry">' +
+          '<div class="progress-entry-path">' + pathHtml + '</div>' +
+          '<div class="progress-entry-meta">' +
+            '<span>' + entry.count + '冊</span>' +
+            '<span class="progress-entry-badge">✅ ' + timeLabelOf(entry.completedAt) + ' 完了</span>' +
+          '</div>' +
+        '</div>';
+    });
+    body.innerHTML = html;
+  }
+
+  function openProgressPage(){
+    renderProgressPage();
+    $("progressPageOverlay").classList.add("open");
+  }
+  function closeProgressPage(){
+    $("progressPageOverlay").classList.remove("open");
+  }
+
   function showStatsSummary(){
     var counts = {checked:0, fix:0, fixReflected:0, withdraw:0, continue:0, memoOnly:0};
     Object.keys(statusMap).forEach(function(id){
@@ -1082,6 +1228,8 @@
   $("fabOverlay").addEventListener("click", function(e){
     if(e.target === $("fabOverlay")) $("fabOverlay").classList.remove("open");
   });
+  $("progressLogBtn").addEventListener("click", function(){ $("fabOverlay").classList.remove("open"); openProgressPage(); });
+  $("progressPageCloseBtn").addEventListener("click", closeProgressPage);
   $("sendToSheetBtn").addEventListener("click", function(){ sendToSheet(); });
   $("statsBtn").addEventListener("click", function(){ $("fabOverlay").classList.remove("open"); showStatsSummary(); });
   $("resetBtn").addEventListener("click", function(){ $("fabOverlay").classList.remove("open"); resetCurrentScope(); });
@@ -1094,8 +1242,8 @@
   });
 
   $("reloadBtn").addEventListener("click", function(){
-    if(confirm("Wi-Fiにつながっている状態で、最新の蔵書データを取得します。\n点検中のリストが入れ替わるので、作業の合間に行ってください。よろしいですか？")){
-      fetchFromNetwork();
+    if(confirm("Wi-Fiにつながっている状態で、最新の蔵書データを取得します。\n点検中のリストが入れ替わり、進捗一覧の記録もリセットされます。作業の合間に行ってください。よろしいですか？")){
+      fetchFromNetwork(true);
     }
   });
 
@@ -1110,6 +1258,7 @@
 
   // ---------- 初期化 ----------
   loadStatusMap();
+  loadProgressLog();
   loadFilters();
   startApp();
 
