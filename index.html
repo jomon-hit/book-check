@@ -804,21 +804,27 @@
     visibleList.sort(function(a, b){
       var aA = a["著者読み"] || (a["著者"] || "").replace(/\s/g, "");
       var bA = b["著者読み"] || (b["著者"] || "").replace(/\s/g, "");
-      if(aA !== bA) return aA.localeCompare(bA, "ja");
+      if(aA < bA) return -1;
+      if(aA > bA) return 1;
 
       var aS = a["シリーズ"] || "";
       var bS = b["シリーズ"] || "";
       if(aS !== bS){
         if(!aS) return 1;
         if(!bS) return -1;
-        return aS.localeCompare(bS, "ja");
+        if(aS < bS) return -1;
+        if(aS > bS) return 1;
       }
 
       var aO = parseFloat(a["順番"]) || 0;
       var bO = parseFloat(b["順番"]) || 0;
       if(aO !== bO) return aO - bO;
 
-      return (a["タイトル"] || "").localeCompare(b["タイトル"] || "", "ja");
+      var aT = a["タイトル"] || "";
+      var bT = b["タイトル"] || "";
+      if(aT < bT) return -1;
+      if(aT > bT) return 1;
+      return 0;
     });
     // 進捗（チェック済み件数は「現在の絞り込み」だけを基準にする。statusView自体は除外して数える）
     var scopeForProgress = allBooks.filter(function(b){
