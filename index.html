@@ -800,6 +800,26 @@
   function renderList(){
     visibleList = allBooks.filter(matchesFilters);
 
+// 著者読み→シリーズ→巻数（順番）→タイトルの順でソート
+    visibleList.sort(function(a, b){
+      var aA = a["著者読み"] || (a["著者"] || "").replace(/\s/g, "");
+      var bA = b["著者読み"] || (b["著者"] || "").replace(/\s/g, "");
+      if(aA !== bA) return aA.localeCompare(bA, "ja");
+
+      var aS = a["シリーズ"] || "";
+      var bS = b["シリーズ"] || "";
+      if(aS !== bS){
+        if(!aS) return 1;
+        if(!bS) return -1;
+        return aS.localeCompare(bS, "ja");
+      }
+
+      var aO = parseFloat(a["順番"]) || 0;
+      var bO = parseFloat(b["順番"]) || 0;
+      if(aO !== bO) return aO - bO;
+
+      return (a["タイトル"] || "").localeCompare(b["タイトル"] || "", "ja");
+    });
     // 進捗（チェック済み件数は「現在の絞り込み」だけを基準にする。statusView自体は除外して数える）
     var scopeForProgress = allBooks.filter(function(b){
       if(filters.daibunrui && b["大分類"] !== filters.daibunrui) return false;
