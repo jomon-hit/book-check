@@ -274,7 +274,7 @@
           <div class="sub" id="totalCountLabel">読み込み中…</div>
         </div>
       </div>
-      <button class="icon-btn" id="reloadBtn" title="最新データを再読込">⟳</button>
+      <button class="icon-btn" id="reloadBtn" title="最新データに更新">⟳</button>
     </div>
     <div class="progress-wrap">
       <div class="progress-label">
@@ -351,10 +351,10 @@
   <div class="fab-menu">
     <h3>メニュー</h3>
     <button class="menu-item" id="progressLogBtn"><span class="em">📋</span>進捗一覧を見る</button>
-    <button class="menu-item" id="sendToSheetBtn"><span class="em">📤</span>点検結果をスプレッドシートに送信</button>
     <button class="menu-item" id="showOnlyUncheckedBtn"><span class="em">👁</span><span id="toggleUncheckedLabel">未チェックのみ表示にする</span></button>
     <button class="menu-item" id="statsBtn"><span class="em">📊</span>点検状況の全体サマリー</button>
     <button class="menu-item danger" id="resetBtn"><span class="em">🗑</span>この絞り込みの点検状況をリセット</button>
+    <button class="menu-item danger" id="newSeasonBtn"><span class="em">🔄</span>新しい点検を始める</button>
   </div>
 </div>
 
@@ -377,6 +377,9 @@
   "use strict";
 
   var BOOKS_URL = "https://hamatosho-search.vercel.app/books.json";
+  // 点検マスターシート用GAS Webアプリの公開URL（デプロイ後に差し替え）
+  var SYNC_WEBAPP_URL = "https://script.google.com/macros/s/AKfycbzlcrAbF9dHI5NAFIJR1SmLi9XVuBCyFb6nL77Xr9M-qYyGAtZTLRobjw-BEE53Gfm4/exec";
+  var SEASON_ID_KEY = "shelfCheckSeasonId_v1";
   var STORAGE_KEY = "shelfCheckStatus_v1";
   var FILTER_KEY = "shelfCheckFilters_v1";
   var BOOKS_CACHE_KEY = "shelfCheckBooksCache_v1";
@@ -449,6 +452,17 @@
     }catch(e){
       showToast("保存に失敗しました（容量制限の可能性）");
     }
+  }
+
+  // ---------- シーズンID管理 ----------
+  function getLocalSeasonId(){
+    try{ return localStorage.getItem(SEASON_ID_KEY) || ""; }catch(e){ return ""; }
+  }
+  function setLocalSeasonId(id){
+    try{ localStorage.setItem(SEASON_ID_KEY, id); }catch(e){}
+  }
+  function clearLocalSeasonId(){
+    try{ localStorage.removeItem(SEASON_ID_KEY); }catch(e){}
   }
 
   function loadProgressLog(){
@@ -569,6 +583,158 @@
             '<span style="font-size:11px;opacity:.7;">(' + escapeHtml(String(err.message||err)) + ')</span></div>';
         }
       });
+  }
+
+  // ---------- 更新ボタン：books.json取得＋点検マスターとの双方向マージ ----------
+  function runFullUpdate(){
+    $("bookList").innerHTML = '<div class="loading"><div class="spinner"></div>最新データを取得しています…</div>';
+    $("filterArea").style.display = "none";
+
+    fetch(BOOKS_URL + "?t=" + Date.now())
+      .then(function(res){
+        if(!res.ok) throw new Error("books.json HTTP " + res.status);
+        return res.json();
+      })
+      .then(function(booksData){
+        // 蔵書データはここで確定反映。同期側が失敗してもこの更新は無かったことにしない
+        applyBooksData(booksData, true);
+        renderList();
+        runSyncStep();
+      })
+      .catch(function(err){
+        var cached = loadBooksFromCache();
+        if(cached && cached.length){
+          applyBooksData(cached, false);
+          renderList();
+          showToast("蔵書データの取得に失敗。保存済みデータを表示しています");
+        } else {
+          $("bookList").innerHTML =
+            '<div class="empty-state">⚠️ データを読み込めませんでした。<br>' +
+            'Wi-Fiにつながる場所で、右上の更新ボタンを押してください。<br>' +
+            '<span style="font-size:11px;opacity:.7;">(' + escapeHtml(String(err.message||err)) + ')</span></div>';
+        }
+      });
+  }
+
+  // 点検マスターとの同期（チェック状況の取得・マージ・送信）。
+  // 蔵書データの更新とは切り離してあるので、これが失敗しても蔵書データの更新結果は残る。
+  function runSyncStep(){
+    if(SYNC_WEBAPP_URL.indexOf("【") !== -1){
+      showToast("蔵書データを更新しました（同期先が未設定のため、点検状況の同期はスキップ）");
+      return;
+    }
+
+    fetch(SYNC_WEBAPP_URL, { method: "GET", redirect: "follow" })
+      .then(function(res){
+        if(!res.ok) throw new Error("同期先 HTTP " + res.status);
+        return res.json();
+      })
+      .then(function(syncData){
+        syncData = syncData || {};
+        var localSeasonId = getLocalSeasonId();
+        var remoteSeasonId = syncData.seasonId || "";
+
+        if(localSeasonId && remoteSeasonId && localSeasonId !== remoteSeasonId){
+          showToast("蔵書データを更新しました。新しいシーズンが始まっています。「新しい点検を始める」を押してください");
+          return;
+        }
+
+        mergeCheckDataFromRemote(syncData.checks || {});
+        setLocalSeasonId(remoteSeasonId);
+        clearProgressLog();
+        renderList();
+
+        var updates = buildUpdatesForSync();
+        if(updates.length > 0){
+          sendUpdatesToSheet(updates);
+        } else {
+          showToast("最新データに更新しました");
+        }
+      })
+      .catch(function(err){
+        showToast("蔵書データは最新化されました（点検状況の同期は失敗。次回の更新で再試行します）");
+      });
+  }
+
+  // 点検マスター側のチェック状況をローカルへ取り込む
+  // ・ローカルに無いidはシートの内容をそのまま取り込む
+  // ・ローカルに有るidは「チェック済み」だけOR合成（シートがTRUEならローカルもTRUEに）
+  //   修正要〜メモはローカル側の値を正として送信側で上書きするので、ここでは触らない
+  function mergeCheckDataFromRemote(remoteChecks){
+    Object.keys(remoteChecks).forEach(function(id){
+      var remote = remoteChecks[id];
+      var local = statusMap[id];
+
+      if(!local){
+        var flags = {};
+        if(remote.checked) flags.checked = true;
+        if(remote.fix) flags.fix = true;
+        if(remote.withdraw) flags.withdraw = true;
+        if(remote.continue) flags.continue = true;
+        if(Object.keys(flags).length || remote.memo){
+          statusMap[id] = {
+            flags: flags,
+            memo: remote.memo || "",
+            reflected: false,
+            updatedAt: new Date().toISOString()
+          };
+        }
+      } else {
+        if(remote.checked && !(local.flags && local.flags.checked)){
+          if(!local.flags) local.flags = {};
+          local.flags.checked = true;
+          local.updatedAt = new Date().toISOString();
+        }
+      }
+    });
+    saveStatusMap();
+  }
+
+  // ローカルに記録がある本（チェック済み〜メモのいずれか）をシートへ送る形に整形
+  function buildUpdatesForSync(){
+    var updates = [];
+    Object.keys(statusMap).forEach(function(id){
+      var entry = statusMap[id];
+      if(!entry) return;
+      var flags = entry.flags || {};
+      if(!hasAnyFlag(entry) && !entry.memo) return;
+      updates.push({
+        id: id,
+        checked: !!flags.checked,
+        fix: !!flags.fix,
+        withdraw: !!flags.withdraw,
+        continue: !!flags.continue,
+        memo: entry.memo || ""
+      });
+    });
+    return updates;
+  }
+
+  function sendUpdatesToSheet(updates){
+    fetch(SYNC_WEBAPP_URL, {
+      method: "POST",
+      headers: {"Content-Type": "text/plain;charset=utf-8"},
+      body: JSON.stringify({ updates: updates })
+    })
+      .then(function(res){ return res.json(); })
+      .then(function(result){
+        showToast("最新データに更新（" + (result.updated || 0) + "件を反映）しました");
+      })
+      .catch(function(err){
+        showToast("最新データは取得済み。送信のみ失敗しました（次回の更新で再送されます）");
+      });
+  }
+
+  // ---------- 新しい点検を始める（シーズンリセット、ローカルのみ） ----------
+  function startNewSeasonLocal(){
+    if(!confirm("前期の点検データ（チェック済み・修正要・除籍候補・続刊確認・メモ）をクリアします。よろしいですか？")) return;
+    statusMap = {};
+    saveStatusMap();
+    clearProgressLog();
+    clearLocalSeasonId(); // 次回の更新時に、その時点の最新シーズンIDを取り込む
+    buildFilterChips();
+    renderList();
+    showToast("新しい点検を始めました");
   }
 
   // ---------- フィルターチップ構築 ----------
@@ -1045,77 +1211,6 @@
   }
 
   // ---------- メニュー ----------
-  function buildExportPayload(){
-    var items = [];
-    Object.keys(statusMap).forEach(function(id){
-      var entry = statusMap[id];
-      if(!entry || !hasAnyFlag(entry) && !entry.memo) return;
-      var b = findBook(id) || {};
-      var flags = entry.flags || {};
-      var flagLabels = FLAG_ORDER.filter(function(k){ return flags[k]; }).map(function(k){ return FLAG_META[k].label; });
-      items.push({
-        id: id,
-        タイトル: b["タイトル"] || "",
-        著者: b["著者"] || "",
-        大分類: b["大分類"] || "",
-        対象: b["対象"] || "",
-        背ラベル: b["背ラベル"] || "",
-        ISBN: b["ISBN"] || "",
-        チェック済み: !!flags.checked,
-        データ修正要: !!flags.fix,
-        除籍候補: !!flags.withdraw,
-        続刊確認: !!flags.continue,
-        ステータス表示: flagLabels.join("、"),
-        Excel反映済み: !!entry.reflected,
-        メモ: entry.memo || "",
-        更新日時: entry.updatedAt || ""
-      });
-    });
-    items.sort(function(a,b){ return (a.更新日時||"").localeCompare(b.更新日時||""); });
-    return {
-      点検日時: new Date().toISOString(),
-      件数: items.length,
-      items: items
-    };
-  }
-
-  var SHEET_WEBAPP_URL = "https://script.google.com/macros/s/AKfycbzP0IUozjt_WdMtLpbtMMgKDg8dnJzC8KHiY6eIGgMBJf8xvviUCCHsiwPaUK7eZDRd5g/exec";
-
-  function sendToSheet(){
-    var payload = buildExportPayload();
-    if(payload.items.length === 0){
-      showToast("まだ記録がありません");
-      return;
-    }
-    if(SHEET_WEBAPP_URL.indexOf("【") !== -1){
-      showToast("送信先が未設定です（管理者に連絡してください）");
-      return;
-    }
-
-    var btn = $("sendToSheetBtn");
-    var originalLabel = btn.innerHTML;
-    btn.innerHTML = '<span class="em">⏳</span>送信中…';
-    btn.disabled = true;
-
-    fetch(SHEET_WEBAPP_URL, {
-      method: "POST",
-      mode: "no-cors",
-      headers: {"Content-Type": "text/plain;charset=utf-8"},
-      body: JSON.stringify(payload)
-    })
-    .then(function(){
-      // no-cors時はレスポンス内容を読めないため、通信が完了したことのみで成功とみなす
-      showToast(payload.items.length + "件をスプレッドシートに送信しました");
-      $("fabOverlay").classList.remove("open");
-    })
-    .catch(function(err){
-      showToast("送信に失敗しました。Wi-Fiを確認してください");
-    })
-    .finally(function(){
-      btn.innerHTML = originalLabel;
-      btn.disabled = false;
-    });
-  }
 
   function dateKeyOf(isoString){
     var d = new Date(isoString);
@@ -1182,7 +1277,15 @@
     showToast(msg);
   }
 
+  function hasAnyFilterActive(){
+    return !!(filters.daibunrui || filters.taisho || filters.toshoSize || filters.seLabel);
+  }
+
   function resetCurrentScope(){
+    if(!hasAnyFilterActive()){
+      showToast("絞り込んでから使ってください");
+      return;
+    }
     var scopeIds = allBooks.filter(function(b){
       if(filters.daibunrui && b["大分類"] !== filters.daibunrui) return false;
       if(filters.taisho && b["対象"] !== filters.taisho) return false;
@@ -1217,15 +1320,18 @@
 
   $("fabBtn").addEventListener("click", function(){
     $("fabOverlay").classList.add("open");
+    var resetBtn = $("resetBtn");
+    resetBtn.disabled = !hasAnyFilterActive();
+    resetBtn.style.opacity = resetBtn.disabled ? "0.4" : "";
   });
   $("fabOverlay").addEventListener("click", function(e){
     if(e.target === $("fabOverlay")) $("fabOverlay").classList.remove("open");
   });
   $("progressLogBtn").addEventListener("click", function(){ $("fabOverlay").classList.remove("open"); openProgressPage(); });
   $("progressPageCloseBtn").addEventListener("click", closeProgressPage);
-  $("sendToSheetBtn").addEventListener("click", function(){ sendToSheet(); });
   $("statsBtn").addEventListener("click", function(){ $("fabOverlay").classList.remove("open"); showStatsSummary(); });
   $("resetBtn").addEventListener("click", function(){ $("fabOverlay").classList.remove("open"); resetCurrentScope(); });
+  $("newSeasonBtn").addEventListener("click", function(){ $("fabOverlay").classList.remove("open"); startNewSeasonLocal(); });
   $("showOnlyUncheckedBtn").addEventListener("click", function(){
     $("fabOverlay").classList.remove("open");
     filters.statusView = (filters.statusView === "unchecked") ? "all" : "unchecked";
@@ -1235,8 +1341,8 @@
   });
 
   $("reloadBtn").addEventListener("click", function(){
-    if(confirm("Wi-Fiにつながっている状態で、最新の蔵書データを取得します。\n点検中のリストが入れ替わり、進捗一覧の記録もリセットされます。作業の合間に行ってください。よろしいですか？")){
-      fetchFromNetwork(true);
+    if(confirm("Wi-Fiにつながっている状態で、最新データに更新します。\n蔵書データを最新化し、点検マスターとチェック状況を同期します。作業の合間に行ってください。よろしいですか？")){
+      runFullUpdate();
     }
   });
 
