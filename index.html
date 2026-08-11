@@ -515,9 +515,19 @@
       return JSON.parse(raw);
     }catch(e){ return null; }
   }
+  // localStorageの容量節約のため、点検アプリで実際に使うフィールドだけに絞ってキャッシュする
+  // （あらすじ・ISBN・出版社・購入価格・発行日等は画面表示に未使用のため保存しない）
+  var CACHE_FIELDS = ["id","タイトル","大分類","対象","著者","著者読み","シリーズ","順番","背ラベル","ラベル色","図書サイズ","qr_url","書影"];
+  function trimBookForCache(b){
+    var t = {};
+    CACHE_FIELDS.forEach(function(k){ t[k] = b[k] !== undefined ? b[k] : ""; });
+    return t;
+  }
+
   function saveBooksToCache(data){
     try{
-      localStorage.setItem(BOOKS_CACHE_KEY, JSON.stringify(data));
+      var trimmed = data.map(trimBookForCache);
+      localStorage.setItem(BOOKS_CACHE_KEY, JSON.stringify(trimmed));
       localStorage.setItem(BOOKS_CACHE_TIME_KEY, new Date().toISOString());
     }catch(e){
       showToast("蔵書データの保存に失敗しました（容量制限の可能性）");
