@@ -1,6 +1,6 @@
 // はまとしょ 蔵書点検 - Service Worker
 // ホーム画面に追加したアプリをオフラインでも起動できるようにするためのキャッシュ
-var CACHE_NAME = "shelf-check-cache-v3";
+var CACHE_NAME = "shelf-check-cache-v5";
 var CORE_ASSETS = [
   "./index.html",
   "./manifest.json",

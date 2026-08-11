@@ -244,6 +244,24 @@
   }
   .progress-day-label:first-child{margin-top:0;}
 
+  .progress-summary-section{margin-bottom:18px; padding-bottom:14px; border-bottom:1px solid var(--line);}
+  .progress-summary-title{font-size:11px; color:var(--ink-soft); letter-spacing:.06em; margin-bottom:10px;}
+  .progress-bar-row{margin-bottom:10px;}
+  .progress-bar-row:last-child{margin-bottom:0;}
+  .progress-bar-label{
+    display:flex; justify-content:space-between; align-items:baseline;
+    font-size:12px; font-weight:700; color:var(--ink); margin-bottom:4px;
+  }
+  .progress-bar-label .count{font-size:11px; font-weight:400; color:var(--ink-soft);}
+  .progress-bar-track{
+    height:10px; border-radius:6px; background:var(--bg); border:1px solid var(--line); overflow:hidden;
+  }
+  .progress-bar-fill{
+    height:100%; border-radius:6px; background:var(--navy);
+    transition:width .3s ease;
+  }
+  .progress-bar-fill.complete{background:var(--green);}
+
   .fab{
     position:fixed; bottom:18px; right:18px; z-index:40;
     width:54px; height:54px; border-radius:50%; background:var(--navy); color:#fff;
@@ -432,7 +450,8 @@
     var t = $("toast");
     t.textContent = msg;
     t.classList.add("show");
-    setTimeout(function(){ t.classList.remove("show"); }, 1600);
+    clearTimeout(showToast._timer);
+    showToast._timer = setTimeout(function(){ t.classList.remove("show"); }, 3500);
   }
 
   function loadStatusMap(){
@@ -1222,6 +1241,60 @@
 
   // ---------- メニュー ----------
 
+  function buildProgressBarSection(title, fieldName, orderList){
+    var totals = {}; // 値 -> {total, checked}
+    var order = [];
+    allBooks.forEach(function(b){
+      var val = b[fieldName];
+      if(!val) return; // 該当フィールドが空の本は対象外（図書サイズなど一部の本にしかない項目のため）
+      if(!totals[val]){ totals[val] = {total:0, checked:0}; order.push(val); }
+      totals[val].total++;
+      var entry = statusMap[b.id];
+      if(entry && entry.flags && entry.flags.checked){
+        totals[val].checked++;
+      }
+    });
+
+    if(order.length === 0) return "";
+
+    order.sort(function(a,b){
+      var ai = orderList.indexOf(a), bi = orderList.indexOf(b);
+      if(ai === -1) ai = 999; if(bi === -1) bi = 999;
+      return ai - bi;
+    });
+
+    var rows = order.map(function(val){
+      var t = totals[val];
+      var pct = t.total > 0 ? Math.round((t.checked / t.total) * 100) : 0;
+      var isComplete = t.total > 0 && t.checked === t.total;
+      return (
+        '<div class="progress-bar-row">' +
+          '<div class="progress-bar-label">' +
+            '<span>' + escapeHtml(val) + (isComplete ? " ✅" : "") + '</span>' +
+            '<span class="count">' + t.checked + ' / ' + t.total + '（' + pct + '%）</span>' +
+          '</div>' +
+          '<div class="progress-bar-track">' +
+            '<div class="progress-bar-fill' + (isComplete ? ' complete' : '') + '" style="width:' + pct + '%"></div>' +
+          '</div>' +
+        '</div>'
+      );
+    }).join("");
+
+    return (
+      '<div class="progress-summary-section">' +
+        '<div class="progress-summary-title">' + escapeHtml(title) + '</div>' +
+        rows +
+      '</div>'
+    );
+  }
+
+  function buildCategoryProgressHtml(){
+    return (
+      buildProgressBarSection("対象別 進行状況（チェック済み）", "対象", TAISHO_ORDER) +
+      buildProgressBarSection("図書サイズ別 進行状況（チェック済み）", "図書サイズ", TOSHO_SIZE_ORDER)
+    );
+  }
+
   function dateKeyOf(isoString){
     var d = new Date(isoString);
     return d.getFullYear() + "/" + (d.getMonth()+1) + "/" + d.getDate();
@@ -1235,12 +1308,15 @@
   function renderProgressPage(){
     $("progressPageCount").textContent = progressLog.length + "件 完了";
     var body = $("progressPageBody");
+    var categoryHtml = buildCategoryProgressHtml();
+
     if(progressLog.length === 0){
-      body.innerHTML = '<div class="progress-empty">まだ完了した背ラベルはありません。<br>背ラベルの中の本が全部対応済みになると、ここに記録されます。</div>';
+      body.innerHTML = categoryHtml +
+        '<div class="progress-empty">まだ完了した背ラベルはありません。<br>上のカテゴリー別バーで全体の進み具合を確認できます。<br>背ラベルの中の本が全部対応済みになると、ここに個別記録が増えていきます。</div>';
       return;
     }
 
-    var html = "";
+    var html = categoryHtml;
     var lastDateKey = null;
     progressLog.forEach(function(entry){
       var dKey = dateKeyOf(entry.completedAt);
