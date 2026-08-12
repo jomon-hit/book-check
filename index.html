@@ -113,6 +113,10 @@
   .book-author{font-size:12px; color:var(--ink-soft); margin:0 0 6px;}
   .book-meta{display:flex; gap:5px; flex-wrap:wrap;}
   .meta-tag{font-size:10px; padding:2px 7px; border-radius:5px; background:var(--bg); color:var(--ink-soft); border:1px solid var(--line);}
+  .loan-badge{
+    font-size:11px; font-weight:700; color:#9a3b2b; background:#fde6df;
+    border:1px solid #f0c4b8; border-radius:6px; padding:3px 8px; margin-top:6px; display:inline-block;
+  }
 
   .flag-toggle-row{display:flex; gap:6px; margin-top:9px; padding-top:9px; border-top:1px solid var(--line);}
   .flag-toggle{
@@ -399,6 +403,7 @@
   var SYNC_WEBAPP_URL = "https://script.google.com/macros/s/AKfycbzlcrAbF9dHI5NAFIJR1SmLi9XVuBCyFb6nL77Xr9M-qYyGAtZTLRobjw-BEE53Gfm4/exec";
   var SEASON_ID_KEY = "shelfCheckSeasonId_v1";
   var STORAGE_KEY = "shelfCheckStatus_v1";
+  var LOAN_STORAGE_KEY = "shelfCheckLoanStatus_v1";
   var FILTER_KEY = "shelfCheckFilters_v1";
   var BOOKS_CACHE_KEY = "shelfCheckBooksCache_v1";
   var BOOKS_CACHE_TIME_KEY = "shelfCheckBooksCacheTime_v1";
@@ -669,6 +674,7 @@
         }
 
         mergeCheckDataFromRemote(syncData.checks || {});
+        saveLoanStatus(syncData.loans || {});
         setLocalSeasonId(remoteSeasonId);
         clearProgressLog();
         renderList();
@@ -689,6 +695,25 @@
   // ・ローカルに無いidはシートの内容をそのまま取り込む
   // ・ローカルに有るidは「チェック済み」だけOR合成（シートがTRUEならローカルもTRUEに）
   //   修正要〜メモはローカル側の値を正として送信側で上書きするので、ここでは触らない
+  function saveLoanStatus(loans){
+    try{
+      localStorage.setItem(LOAN_STORAGE_KEY, JSON.stringify(loans || {}));
+    }catch(e){
+      // 貸出情報は参考表示のみなので、保存に失敗しても致命的ではない
+    }
+    getLoanStatus._cache = loans || {}; // キャッシュも即時更新
+  }
+  function getLoanStatus(id){
+    if(!getLoanStatus._cache){
+      try{
+        getLoanStatus._cache = JSON.parse(localStorage.getItem(LOAN_STORAGE_KEY) || "{}");
+      }catch(e){
+        getLoanStatus._cache = {};
+      }
+    }
+    return getLoanStatus._cache[id] || null;
+  }
+
   function mergeCheckDataFromRemote(remoteChecks){
     Object.keys(remoteChecks).forEach(function(id){
       var remote = remoteChecks[id];
@@ -958,6 +983,11 @@
 
     var memoMarkHtml = hasMemo ? '<span class="memo-dot" title="メモあり">📝</span>' : "";
 
+    var loanInfo = getLoanStatus(b.id);
+    var loanBadgeHtml = loanInfo
+      ? '<div class="loan-badge">📕 貸出中' + (loanInfo.due ? '（返却予定：' + escapeHtml(loanInfo.due) + '）' : '') + '</div>'
+      : "";
+
     return (
       '<div class="book-card' + (anyFlag ? " done" : "") + '" data-id="' + escapeHtml(b.id) + '">' +
         '<div class="book-card-top">' +
@@ -969,6 +999,7 @@
               '<span class="meta-tag">' + escapeHtml(b["背ラベル"]||"-") + '</span>' +
               '<span class="meta-tag">' + escapeHtml(b["図書サイズ"]||"-") + '</span>' +
             '</div>' +
+            loanBadgeHtml +
           '</div>' +
         '</div>' +
         '<div class="verify-row">' + verifyHtml + '</div>' +
