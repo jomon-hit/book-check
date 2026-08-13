@@ -730,6 +730,9 @@
     return getLoanStatus._cache[id] || null;
   }
 
+  // 「修正待ち一覧」の反映OKが書き込むメモと同じ文言（GAS側 FIXLIST_CONFIG.DONE_MEMO と一致させること）
+  var RESOLVED_MEMO_TEXT = "修正済み、ブックデータ更新待ち";
+
   function mergeCheckDataFromRemote(remoteChecks){
     Object.keys(remoteChecks).forEach(function(id){
       var remote = remoteChecks[id];
@@ -753,6 +756,15 @@
         if(remote.checked && !(local.flags && local.flags.checked)){
           if(!local.flags) local.flags = {};
           local.flags.checked = true;
+          local.updatedAt = new Date().toISOString();
+        }
+        // 図書館側で「修正待ち一覧」の反映OKが押された本は、
+        // この端末に残ってた古い「データ修正要」フラグを強制的に解消する
+        // （そうしないと、この端末が次に更新した時、古いフラグを送り返して復活させてしまうため）
+        if(remote.memo === RESOLVED_MEMO_TEXT && local.memo !== RESOLVED_MEMO_TEXT){
+          if(!local.flags) local.flags = {};
+          local.flags.fix = false;
+          local.memo = remote.memo;
           local.updatedAt = new Date().toISOString();
         }
       }
