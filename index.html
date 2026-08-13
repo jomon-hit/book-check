@@ -69,6 +69,18 @@
   .chip .count{opacity:.65; font-size:11px; margin-left:2px;}
 
   .filter-row-label{font-size:10px; color:var(--ink-soft); padding:8px 14px 0; letter-spacing:.08em;}
+  .search-row{
+    display:flex; align-items:center; gap:6px; padding:10px 14px 0;
+  }
+  #titleSearchInput{
+    flex:1; font-size:14px; padding:8px 12px; border:1px solid var(--line); border-radius:8px;
+    outline:none; background:#fff;
+  }
+  #titleSearchInput:focus{border-color:var(--navy);}
+  .search-clear-btn{
+    font-size:16px; line-height:1; padding:6px 10px; border-radius:8px; border:1px solid var(--line);
+    background:#fff; color:var(--ink-soft); cursor:pointer;
+  }
 
   /* ステータスフィルタ */
   .status-filter{display:flex; gap:6px; padding:8px 14px 12px; flex-wrap:wrap;}
@@ -307,6 +319,10 @@
   </header>
 
   <div id="filterArea" style="display:none;">
+    <div class="search-row">
+      <input type="text" id="titleSearchInput" placeholder="書名で検索（部分一致）" autocomplete="off">
+      <button class="search-clear-btn" id="titleSearchClear" style="display:none;">×</button>
+    </div>
     <div class="filter-row-label">大分類</div>
     <div class="filter-scroll" id="daibunruiChips"></div>
     <div class="filter-row-label">対象（ラベル色）</div>
@@ -420,7 +436,7 @@
   var allBooks = [];
   var statusMap = {};        // id -> {flags:{checked,fix,withdraw,continue}, memo, reflected, updatedAt}
   var verifyState = {};      // id -> {bookcard:bool, label:bool}  ※保存しない揮発性の確認状態
-  var filters = {daibunrui:"", taisho:"", toshoSize:"", seLabel:"", statusView:"all"};
+  var filters = {daibunrui:"", taisho:"", toshoSize:"", seLabel:"", statusView:"all", keyword:""};
   var currentBookId = null;
   var visibleList = [];
   var lastSeLabelOptions = [];
@@ -523,7 +539,7 @@
       var raw = localStorage.getItem(FILTER_KEY);
       if(raw){
         var parsed = JSON.parse(raw);
-        filters = Object.assign({daibunrui:"", taisho:"", toshoSize:"", seLabel:"", statusView:"all"}, parsed);
+        filters = Object.assign({daibunrui:"", taisho:"", toshoSize:"", seLabel:"", statusView:"all", keyword:""}, parsed);
       }
     }catch(e){}
   }
@@ -839,6 +855,13 @@
   }
 
   function buildFilterChips(){
+    // 検索ボックスの表示を現在のfiltersと同期
+    var searchInput = $("titleSearchInput");
+    if(searchInput && searchInput.value !== filters.keyword){
+      searchInput.value = filters.keyword || "";
+    }
+    $("titleSearchClear").style.display = filters.keyword ? "" : "none";
+
     // 大分類
     var daiScope = allBooks;
     var daiOptions = uniqueOrdered(daiScope.map(function(b){return b["大分類"];}), DAIBUNRUI_ORDER);
@@ -1008,11 +1031,18 @@
     );
   }
 
+  function matchesKeyword(b){
+    if(!filters.keyword) return true;
+    var title = b["タイトル"] || "";
+    return title.indexOf(filters.keyword) !== -1;
+  }
+
   function matchesFilters(b){
     if(filters.daibunrui && b["大分類"] !== filters.daibunrui) return false;
     if(filters.taisho && b["対象"] !== filters.taisho) return false;
     if(filters.daibunrui === "読む" && filters.toshoSize && b["図書サイズ"] !== filters.toshoSize) return false;
     if(filters.seLabel && b["背ラベル"] !== filters.seLabel) return false;
+    if(!matchesKeyword(b)) return false;
     var entry = statusMap[b.id];
     var flags = (entry && entry.flags) || {};
     var reflected = !!(entry && entry.reflected);
@@ -1058,6 +1088,7 @@
       if(filters.taisho && b["対象"] !== filters.taisho) return false;
       if(filters.daibunrui === "読む" && filters.toshoSize && b["図書サイズ"] !== filters.toshoSize) return false;
       if(filters.seLabel && b["背ラベル"] !== filters.seLabel) return false;
+      if(!matchesKeyword(b)) return false;
       return true;
     });
     var doneCount = scopeForProgress.filter(function(b){
@@ -1395,7 +1426,7 @@
   }
 
   function hasAnyFilterActive(){
-    return !!(filters.daibunrui || filters.taisho || filters.toshoSize || filters.seLabel);
+    return !!(filters.daibunrui || filters.taisho || filters.toshoSize || filters.seLabel || filters.keyword);
   }
 
   function resetCurrentScope(){
@@ -1408,6 +1439,7 @@
       if(filters.taisho && b["対象"] !== filters.taisho) return false;
       if(filters.daibunrui === "読む" && filters.toshoSize && b["図書サイズ"] !== filters.toshoSize) return false;
       if(filters.seLabel && b["背ラベル"] !== filters.seLabel) return false;
+      if(!matchesKeyword(b)) return false;
       return true;
     }).map(function(b){ return b.id; });
 
@@ -1420,6 +1452,20 @@
   }
 
   // ---------- イベント結線 ----------
+  $("titleSearchInput").addEventListener("input", function(){
+    filters.keyword = $("titleSearchInput").value.trim();
+    $("titleSearchClear").style.display = filters.keyword ? "" : "none";
+    saveFilters();
+    renderList();
+  });
+  $("titleSearchClear").addEventListener("click", function(){
+    $("titleSearchInput").value = "";
+    filters.keyword = "";
+    $("titleSearchClear").style.display = "none";
+    saveFilters();
+    renderList();
+  });
+
   document.querySelectorAll(".sheet .status-btn").forEach(function(btn){
     btn.addEventListener("click", function(){
       toggleFlagInSheet(btn.getAttribute("data-flag"));
