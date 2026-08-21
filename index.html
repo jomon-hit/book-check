@@ -129,6 +129,9 @@
     font-size:11px; font-weight:700; color:#9a3b2b; background:#fde6df;
     border:1px solid #f0c4b8; border-radius:6px; padding:3px 8px; margin-top:6px; display:inline-block;
   }
+  .loan-badge.return-candidate-badge{
+    color:#1d5a8a; background:#e0eefb; border-color:#b8d6f0;
+  }
 
   .flag-toggle-row{display:flex; gap:6px; margin-top:9px; padding-top:9px; border-top:1px solid var(--line);}
   .flag-toggle{
@@ -420,6 +423,8 @@
   var SEASON_ID_KEY = "shelfCheckSeasonId_v1";
   var STORAGE_KEY = "shelfCheckStatus_v1";
   var LOAN_STORAGE_KEY = "shelfCheckLoanStatus_v1";
+  var RETURN_CANDIDATE_STORAGE_KEY = "shelfCheckReturnCandidates_v1";
+  var RETURN_CANDIDATE_CLEAR_STORAGE_KEY = "shelfCheckReturnCandidateClears_v1";
   var FILTER_KEY = "shelfCheckFilters_v1";
   var BOOKS_CACHE_KEY = "shelfCheckBooksCache_v1";
   var BOOKS_CACHE_TIME_KEY = "shelfCheckBooksCacheTime_v1";
@@ -691,6 +696,17 @@
 
         mergeCheckDataFromRemote(syncData.checks || {});
         saveLoanStatus(syncData.loans || {});
+        saveReturnCandidates(syncData.returnCandidates || {});
+
+        // サーバー側で既に返却候補フラグが消えているidは、送信待ちバッファから外す
+        // （まだ残っているidは、次回のsendUpdatesToSheetで再度クリア要求を送る）
+        var pendingClears = loadPendingReturnClears();
+        var syncedReturnCandidates = syncData.returnCandidates || {};
+        Object.keys(pendingClears).forEach(function(id){
+          if(!syncedReturnCandidates[id]) delete pendingClears[id];
+        });
+        savePendingReturnClears(pendingClears);
+
         setLocalSeasonId(remoteSeasonId);
         clearProgressLog();
         renderList();
@@ -728,6 +744,53 @@
       }
     }
     return getLoanStatus._cache[id] || null;
+  }
+
+  // 返却候補（さっき返却されたばかりの本）の保存・取得。
+  // サーバー(点検マスターのAC列)から届いた最新の一覧をそのまま持つ。
+  function saveReturnCandidates(candidates){
+    try{
+      localStorage.setItem(RETURN_CANDIDATE_STORAGE_KEY, JSON.stringify(candidates || {}));
+    }catch(e){
+      // 参考表示のみなので、保存に失敗しても致命的ではない
+    }
+    getReturnCandidate._cache = candidates || {};
+  }
+  function getReturnCandidate(id){
+    if(!getReturnCandidate._cache){
+      try{
+        getReturnCandidate._cache = JSON.parse(localStorage.getItem(RETURN_CANDIDATE_STORAGE_KEY) || "{}");
+      }catch(e){
+        getReturnCandidate._cache = {};
+      }
+    }
+    return !!getReturnCandidate._cache[id];
+  }
+
+  // 「返却候補クリア、まだサーバーに送れてないidの一覧」（端末をまたいでは持たない、この端末だけのバッファ）
+  function loadPendingReturnClears(){
+    try{
+      return JSON.parse(localStorage.getItem(RETURN_CANDIDATE_CLEAR_STORAGE_KEY) || "{}");
+    }catch(e){
+      return {};
+    }
+  }
+  function savePendingReturnClears(map){
+    try{
+      localStorage.setItem(RETURN_CANDIDATE_CLEAR_STORAGE_KEY, JSON.stringify(map || {}));
+    }catch(e){}
+  }
+  // 点検アプリで「チェック済み」にした瞬間に呼ぶ。
+  // その場でバッジを消し（ローカルの見た目を即時反映）、次回の送信に「AC列をfalseへ」という指示を乗せる。
+  function clearReturnCandidateOnCheck(id){
+    if(!getReturnCandidate(id)) return;
+    var cache = getReturnCandidate._cache || {};
+    delete cache[id];
+    saveReturnCandidates(cache);
+
+    var pending = loadPendingReturnClears();
+    pending[id] = true;
+    savePendingReturnClears(pending);
   }
 
   // 「修正待ち一覧」の反映OKが書き込むメモと同じ文言（GAS側 FIXLIST_CONFIG.DONE_MEMO と一致させること）
@@ -775,6 +838,9 @@
   // ローカルに記録がある本（チェック済み〜メモのいずれか）をシートへ送る形に整形
   function buildUpdatesForSync(){
     var updates = [];
+    var pendingClears = loadPendingReturnClears();
+    var coveredIds = {};
+
     Object.keys(statusMap).forEach(function(id){
       var entry = statusMap[id];
       if(!entry) return;
@@ -786,9 +852,18 @@
         fix: !!flags.fix,
         withdraw: !!flags.withdraw,
         continue: !!flags.continue,
-        memo: entry.memo || ""
+        memo: entry.memo || "",
+        returnCandidateClear: !!pendingClears[id]
       });
+      coveredIds[id] = true;
     });
+
+    // statusMapに乗らなかった（フラグ・メモが無い）が、返却候補クリアだけ送りたいidも拾う
+    Object.keys(pendingClears).forEach(function(id){
+      if(coveredIds[id]) return;
+      updates.push({ id: id, returnCandidateClear: true });
+    });
+
     return updates;
   }
 
@@ -974,7 +1049,8 @@
       {key:"fix", label:"⚠️ 修正要（未反映）"},
       {key:"fix_reflected", label:"⚠️✔️ 修正要（反映済み）"},
       {key:"withdraw", label:"🗑 除籍候補"},
-      {key:"continue", label:"📖 続刊確認"}
+      {key:"continue", label:"📖 続刊確認"},
+      {key:"return_candidate", label:"🔄 返却候補"}
     ];
     el.innerHTML = "";
     defs.forEach(function(d){
@@ -1022,6 +1098,9 @@
     var loanBadgeHtml = loanInfo
       ? '<div class="loan-badge">📕 貸出中' + (loanInfo.due ? '（返却予定：' + escapeHtml(loanInfo.due) + '）' : '') + '</div>'
       : "";
+    var returnCandidateBadgeHtml = (!loanInfo && getReturnCandidate(b.id))
+      ? '<div class="loan-badge return-candidate-badge">🔄 返却候補（要チェック）</div>'
+      : "";
 
     return (
       '<div class="book-card' + (anyFlag ? " done" : "") + '" data-id="' + escapeHtml(b.id) + '">' +
@@ -1035,6 +1114,7 @@
               '<span class="meta-tag">' + escapeHtml(b["図書サイズ"]||"-") + '</span>' +
             '</div>' +
             loanBadgeHtml +
+            returnCandidateBadgeHtml +
           '</div>' +
         '</div>' +
         '<div class="verify-row">' + verifyHtml + '</div>' +
@@ -1061,7 +1141,8 @@
     if(filters.statusView === "unchecked") return !hasAnyFlag(entry);
     if(filters.statusView === "fix") return !!flags.fix && !reflected;
     if(filters.statusView === "fix_reflected") return !!flags.fix && reflected;
-    if(filters.statusView !== "all" && !flags[filters.statusView]) return false;
+    if(filters.statusView === "return_candidate") return getReturnCandidate(b.id);
+    if(filters.statusView !== "all" && filters.statusView !== "return_candidate" && !flags[filters.statusView]) return false;
     return true;
   }
 
@@ -1168,6 +1249,7 @@
         entry.updatedAt = new Date().toISOString();
         statusMap[id] = entry;
         saveStatusMap();
+        clearReturnCandidateOnCheck(id);
       }
       delete verifyState[id]; // 確認状態は使い終わったらリセット（次にこの本を見る時はまた未確認から）
       buildFilterChips();
@@ -1214,6 +1296,9 @@
       statusMap[id] = entry;
     }
     saveStatusMap();
+    if(flagKey === "checked" && entry.flags.checked){
+      clearReturnCandidateOnCheck(id);
+    }
     buildFilterChips();
     if(!skipAutoAdvance){
       var advanced = advanceToNextSeLabelIfComplete();
