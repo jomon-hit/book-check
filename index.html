@@ -1050,7 +1050,8 @@
       {key:"fix_reflected", label:"⚠️✔️ 修正要（反映済み）"},
       {key:"withdraw", label:"🗑 除籍候補"},
       {key:"continue", label:"📖 続刊確認"},
-      {key:"return_candidate", label:"🔄 返却候補"}
+      {key:"return_candidate", label:"🔄 返却候補"},
+      {key:"loan_or_return", label:"📕🔄 貸出中・返却候補"}
     ];
     el.innerHTML = "";
     defs.forEach(function(d){
@@ -1142,7 +1143,8 @@
     if(filters.statusView === "fix") return !!flags.fix && !reflected;
     if(filters.statusView === "fix_reflected") return !!flags.fix && reflected;
     if(filters.statusView === "return_candidate") return getReturnCandidate(b.id);
-    if(filters.statusView !== "all" && filters.statusView !== "return_candidate" && !flags[filters.statusView]) return false;
+    if(filters.statusView === "loan_or_return") return !!getLoanStatus(b.id) || getReturnCandidate(b.id);
+    if(filters.statusView !== "all" && filters.statusView !== "return_candidate" && filters.statusView !== "loan_or_return" && !flags[filters.statusView]) return false;
     return true;
   }
 
