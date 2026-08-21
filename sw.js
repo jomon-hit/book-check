@@ -1,6 +1,6 @@
 // はまとしょ 蔵書点検 - Service Worker
 // ホーム画面に追加したアプリをオフラインでも起動できるようにするためのキャッシュ
-var CACHE_NAME = "shelf-check-cache-v8";
+var CACHE_NAME = "shelf-check-cache-v9";
 var CORE_ASSETS = [
   "./index.html",
   "./manifest.json",
@@ -31,12 +31,16 @@ self.addEventListener("activate", function(event){
   self.clients.claim();
 });
 
-// 蔵書データ(books.json)はアプリ側で別にキャッシュ・更新制御しているため、
+// 蔵書データ(books.json)と、点検マスターとの同期API(GAS Webアプリ)は
+// アプリ側で別に鮮度管理・更新制御しているため、
 // Service Workerではネットワーク優先で素通しし、自分のコア資産だけキャッシュを使う。
 self.addEventListener("fetch", function(event){
   var url = event.request.url;
   if(url.indexOf("books.json") !== -1){
     return; // アプリ側のfetchロジックに任せる（介入しない）
+  }
+  if(url.indexOf("script.google.com") !== -1 || url.indexOf("script.googleusercontent.com") !== -1){
+    return; // GAS同期API（貸出状況・点検データ）も同様に素通し
   }
 
   event.respondWith(
